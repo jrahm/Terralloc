@@ -56,9 +56,9 @@ void main() {
     float coef = dot( normalize(vec3(lightPos) - vec3(position)), normalize(normal) ) * 0.5 + 0.5 ;
 
 
-    // frag_color = vec4( original_z, 1.0 );
+    frag_color = vec4( 0,0,1, 1.0 );
     // frag_color = vec4(tex_x,tex_y,0,1.0) ;
     // vec4 color = sample(0,0);
-   frag_color = vec4(vec3(refcolor * coef) * vec3(0.6,0.8,1.0),0.8) * vec4(normalize(globalAmbient.xyz),1.0);
+   // frag_color = vec4(vec3(refcolor * coef) * vec3(0.6,0.8,1.0),0.8) * vec4(normalize(globalAmbient.xyz),1.0);
 //    frag_color = vec4(0,0,1,0.8) ;
 }
