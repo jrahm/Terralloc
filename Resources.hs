@@ -198,6 +198,7 @@ displayHandle resources = do
         uniform (UniformLocation 4) $= pMatrix resources
         uniform (UniformLocation 5) $= l_mvMatrix
         uniform (UniformLocation 7) $= normalMatrix
+        uniform (UniformLocation 8) $= l_mvMatrix `glslMatMul` lightPos
         return ()
 
     SDL.glSwapBuffers
@@ -303,6 +304,8 @@ makeResources surf builder forestB jungleB water = do
     let pMatrix' = perspectiveMatrix 50 1.8 0.1 100
     waterProg <- loadProgramSafe' 
         "shaders/water.vert" "shaders/water.frag" (Nothing::Maybe String)
+    waterTexture <- load "textures/water.jpg" >>= textureFromSurface
+    location <- get (uniformLocation waterProg "texture")
     Resources 
         <$> pure surf
         <*> do CameraPosition
@@ -320,6 +323,7 @@ makeResources surf builder forestB jungleB water = do
         <*> buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png"
         <*> (newDefaultGlyphObjectWithClosure water () $ \_ -> do
                 currentProgram $= Just waterProg
+                setupTexturing waterTexture location 0
                 )
         <*> pure 0
         <*> pure 1

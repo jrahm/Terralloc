@@ -4,8 +4,8 @@
 
 layout(location = 0) out vec4 frag_color ;
 layout(location = 6) uniform vec4 lightPos ;
-
 layout(location = 8) uniform vec4 globalAmbient ;
+
 uniform float dX ;
 uniform float dY ;
 

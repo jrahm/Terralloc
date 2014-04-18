@@ -306,3 +306,7 @@ untilM2 cond ini bod = do
 
 for :: [a] -> (a -> b) -> [b]
 for = flip map
+
+distribMaybe :: Maybe (a,b) -> (Maybe a, Maybe b)
+distribMaybe Nothing = (Nothing,Nothing)
+distribMaybe (Just (a,b)) = (Just a, Just b)

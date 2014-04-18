@@ -89,21 +89,31 @@ getUniformLocation name =
     get currentProgram >>= maybe (return Nothing) (\prog ->
         liftM Just (get $ uniformLocation prog name) )
 
-loadProgramSafe ::
-    (IsShaderSource a,
-     IsShaderSource b,
-     IsShaderSource c) =>
-        a -> b -> Maybe c -> IO (Maybe Program)
-loadProgramSafe vert frag geom = do
+loadProgramFullSafe ::
+    (IsShaderSource tc,
+     IsShaderSource te,
+     IsShaderSource g,
+     IsShaderSource v,
+     IsShaderSource f) => Maybe (tc,te) -> Maybe g -> v -> f -> IO (Maybe Program)
+loadProgramFullSafe tess geometry vert frag = do
+    let (ts1,ts2) = distribMaybe tess
     shaders <- sequence $ catMaybes [
-        Just $ loadShader VertexShader vert,
-        Just $ loadShader FragmentShader frag,
-        liftM (loadShader GeometryShader) geom]
-    -- mapM_ (putStrLn . fst) shaders
-    (linklog, maybeProg) <- createShaderProgramSafe shaders
-
+            Just $ loadShader VertexShader vert,
+            Just $ loadShader FragmentShader frag,
+            liftM (loadShader GeometryShader) geometry,
+            liftM (loadShader TessControlShader) ts1,
+            liftM (loadShader TessEvaluationShader) ts2]
+    (linklog,maybeProg) <- createShaderProgramSafe shaders
     if isNothing maybeProg then do
         putStrLn "Failed to link program"
         putStrLn linklog
         return Nothing
         else return maybeProg
+
+
+loadProgramSafe ::
+    (IsShaderSource a,
+     IsShaderSource b,
+     IsShaderSource c) =>
+        a -> b -> Maybe c -> IO (Maybe Program)
+loadProgramSafe vert frag geom = loadProgramFullSafe (Nothing::Maybe(String,String)) geom vert frag

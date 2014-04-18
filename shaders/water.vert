@@ -11,6 +11,13 @@ layout(location = 4) uniform mat4 pjMatrix ;
 layout(location = 5) uniform mat4 mvMatrix ;
 layout(location = 7) uniform mat3 normalMatrix ;
 
+out vec3 lightPos ;
+out vec3 normal ;
+out vec4 position ;
+out vec2 texpos ;
+
 void main() {
-    gl_Position = pjMatrix * mvMatrix * vec4( in_position, 1.0 );
+    gl_Position = pjMatrix * (position = mvMatrix * vec4( in_position, 1.0 ));
+    normal = normalMatrix * vec3(0,1,0) ;
+    texpos = in_position.xz / 20.0;
 }

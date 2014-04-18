@@ -9,6 +9,7 @@ import Graphics.UI.SDL.Image as SDLImg
 import Graphics.UI.SDL as SDL
 import Graphics.SDL.SDLHelp
 import Graphics.Glyph.Util
+import Graphics.Glyph.ExtendedGL
 import Control.Monad
 
 import Graphics.Glyph.BufferBuilder
@@ -102,11 +103,19 @@ getWaterQuads marr arr = do
     let (_,(w,h)) = bounds marr
     let elevationCacheIO :: IO (Map.Map Int (Int,Int,Int,Int,Int))
         elevationCacheIO = do
-            let tup = (max,max,max,min,min)
+            let tup = (min,max,max,min,min)
             foldM (\themap (x,y) -> do
                     bodyID <- readArray arr (x,y)
                     if bodyID == 0 then return themap else do
-                        let elev = elevation $ marr ! (x,y) :: Int
+                        let valid (x,y) = x >= 0 && x <= w && y >= 0 && y <= h
+                        let neighbors (x,y) = P.filter valid $ map (zipWithT2 (+) (x,y))
+                                                [      (1,0),       
+                                                 (0,1),      (0,-1),
+                                                       (-1,0)      ]
+                        let toelev x = 
+                             let tile = marr ! x in
+                             (tileType tile == Water) ? 1000000000000 $ elevation tile
+                        let elev = minimum $ map toelev (neighbors (x,y))
                         let newmap = Map.insertWith (\old->
                                             zipWithT5 (P.$) (zipWithT5 (P.$) tup old)
                                         ) bodyID (elev,x,y,x,y) themap
@@ -115,16 +124,16 @@ getWaterQuads marr arr = do
 
     dat <- (liftM Map.toList elevationCacheIO)
     return . sequence_ $ for dat $ \(_, (elev,maxx,maxy,minx,miny)) -> do
-        let relev = (fromIntegral elev) / 10
-            mxx = fromIntegral maxx
-            mnx = fromIntegral minx
-            mxy = fromIntegral maxy
-            mny = fromIntegral miny
-        mapM_ bVertex3 $ trianglesFromQuads
-            [(mxx,relev,mxy),
-             (mxx,relev,mny),
-             (mnx,relev,mny),
-             (mnx,relev,mxy)] 
+        let mxx = fromIntegral maxx + 1
+            mnx = fromIntegral minx - 1
+            mxy = fromIntegral maxy + 1
+            mny = fromIntegral miny - 1
+            relev = fromIntegral elev / 10 in
+            mapM_ bVertex3 $ trianglesFromQuads
+                [(mxx,relev,mxy),
+                 (mxx,relev,mny),
+                 (mnx,relev,mny),
+                 (mnx,relev,mxy)] 
 
 
 printArray :: Array (Int,Int) Tile -> IO ()
@@ -263,6 +272,7 @@ main = do
     surface <- simpleStartup "Spectical" (640,480)
     stgen <- newStdGen
     stgen2 <- newStdGen
+
 --    (log',file) <- loadObjFile "tree.obj"
 --    mapM_ putStrLn log'
 
