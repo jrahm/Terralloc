@@ -36,12 +36,13 @@ vec3 calNormChange( vec3 norm, vec3 down, vec3 right ) {
 }
 
 void main() {
-    vec3 down = vec3( 0, -1, 0 ) ;
-    vec3 right = normalize(cross( normal, down )) ;
-    down = normalize(cross( normal, right ) );
-    vec3 newNorm = calNormChange( normal, down, right ) ;
-
-    float coef = dot( normalize(vec3(lightPos) - vec3(position)), normalize(newNorm) ) ;
-    vec4 color = texture2D(texture,texpos) ;
-    frag_color = vec4(color.xyz * vec3(0.0,0.4,0.7) * coef,0.8);
+//    vec3 down = vec3( 0, -1, 0 ) ;
+//    vec3 right = normalize(cross( normal, down )) ;
+//    down = normalize(cross( normal, right ) );
+//    vec3 newNorm = calNormChange( normal, down, right ) ;
+//
+//    float coef = dot( normalize(vec3(lightPos) - vec3(position)), normalize(newNorm) ) ;
+//    vec4 color = texture2D(texture,texpos) ;
+//    frag_color = vec4(color.xyz * vec3(0.0,0.4,0.7) * coef,0.8);
+    frag_color = vec4(0,0,1,0.8) ;
 }

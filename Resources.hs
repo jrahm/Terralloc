@@ -229,6 +229,15 @@ loadProgramSafe' s1 s2 s3 = do
     when (isNothing progMaybe) $ exitWith (ExitFailure 111)
     return $ fromJust progMaybe
 
+loadProgramFullSafe' :: 
+    (IsShaderSource tc, IsShaderSource te,
+     IsShaderSource g, IsShaderSource v,
+     IsShaderSource f) => Maybe (tc, te) -> Maybe g -> v -> f -> IO Program
+loadProgramFullSafe' a b c d = do
+    progMaybe <- loadProgramFullSafe a b c d
+    when (isNothing progMaybe) $ exitWith (ExitFailure 111)
+    return $ fromJust progMaybe
+
 buildTerrainObject :: BuilderM GLfloat b -> IO (GlyphObject ())
 buildTerrainObject builder = do
     let terrainList = map ("terrain/"++)
@@ -302,8 +311,9 @@ makeResources :: SDL.Surface -> BuilderM GLfloat b ->
     BuilderM GLfloat a -> IO Resources
 makeResources surf builder forestB jungleB water = do
     let pMatrix' = perspectiveMatrix 50 1.8 0.1 100
-    waterProg <- loadProgramSafe' 
-        "shaders/water.vert" "shaders/water.frag" (Nothing::Maybe String)
+    waterProg <- loadProgramFullSafe' 
+         (Just ("shaders/water.tcs","shaders/water.tes"))
+         (Nothing::Maybe String) "shaders/water.vert" "shaders/water.frag"
     waterTexture <- load "textures/water.jpg" >>= textureFromSurface
     location <- get (uniformLocation waterProg "texture")
     Resources 
