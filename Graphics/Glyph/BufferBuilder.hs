@@ -204,8 +204,8 @@ storableArrayToBuffer target arr = do
         bufferData target $= (fromIntegral len, ptr, StaticDraw)
     return buffer
 
-ptrToBuffer :: (Storable b) => BufferTarget -> Ptr b -> Int -> IO BufferObject
-ptrToBuffer target ptr len = do
+ptrToBuffer :: (Storable b) => BufferTarget -> Int -> Ptr b -> IO BufferObject
+ptrToBuffer target len ptr = do
     -- len is length in bytes
     [buffer] <- genObjectNames 1
     bindBuffer target $= Just buffer
@@ -237,7 +237,7 @@ textureArrayDescriptor (CompiledBuild stride tup@(_,_,True) _ _ _) =
                       ifp b x = if b then x else 0  
 textureArrayDescriptor  _ = Nothing
 createBufferObject :: BufferTarget -> CompiledBuild GLfloat -> IO BufferObject
-createBufferObject target (CompiledBuild _ _ _ arr len) = ptrToBuffer target arr len
+createBufferObject target (CompiledBuild _ _ _ arr len) = ptrToBuffer target len arr
 
 mapListInsert :: (Ord k) => k -> a -> Map.Map k [a] -> Map.Map k [a]
 mapListInsert key val map =

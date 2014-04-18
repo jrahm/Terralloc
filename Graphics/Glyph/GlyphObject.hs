@@ -26,7 +26,8 @@ module Graphics.Glyph.GlyphObject (
     Drawable, draw, newGlyphObject,
     newDefaultGlyphObject,
     startClosure,
-    newDefaultGlyphObjectWithClosure
+    newDefaultGlyphObjectWithClosure,
+    drawInstances, numInstances, setNumInstances
 ) where
 
 import Graphics.Glyph.BufferBuilder
@@ -54,7 +55,8 @@ data GlyphObject a = GlyphObject {
     setupRoutine :: (Maybe (GlyphObject a -> IO ())), -- Setup
     setupRoutine2 :: (Maybe (GlyphObject a -> IO ())), -- Setup
     teardownRoutine :: (Maybe (GlyphObject a -> IO ())), -- Tear down
-    primitiveMode :: PrimitiveMode
+    primitiveMode :: PrimitiveMode,
+    numInstances :: Int
 }
 
 $(declareSetters ''GlyphObject)
@@ -102,7 +104,7 @@ newGlyphObject :: BuilderM GLfloat x ->
 newGlyphObject builder vertAttr normAttr colorAttr textureAttr res setup tear mode = do
     compiled <- compilingBuilder builder
     buffer <- createBufferObject ArrayBuffer compiled
-    return $ GlyphObject buffer compiled vertAttr normAttr colorAttr textureAttr res setup Nothing tear mode
+    return $ GlyphObject buffer compiled vertAttr normAttr colorAttr textureAttr res setup Nothing tear mode 1
 
 prepare :: GlyphObject a -> (GlyphObject a -> IO()) -> GlyphObject a
 prepare a b = setSetupRoutine2 (Just b) a
@@ -114,10 +116,10 @@ teardown :: GlyphObject a -> (GlyphObject a -> IO()) -> GlyphObject a
 teardown a b = setTeardownRoutine (Just b) a
 
 instance Drawable (GlyphObject a) where
-    draw = drawInstances 1
+    draw = drawInstances <..> numInstances
 
 drawInstances :: Int -> GlyphObject a -> IO ()
-drawInstances n obj@(GlyphObject bo co vAttr nAttr cAttr tAttr _ setup1 setup2 tearDown p) = do
+drawInstances n obj@(GlyphObject bo co vAttr nAttr cAttr tAttr _ setup1 setup2 tearDown p _) = do
     {- Setup whatever we need for the object to draw itself -}
     maybe (return ()) (Prelude.$obj) setup1
     maybe (return ()) (Prelude.$obj) setup2
@@ -148,9 +150,9 @@ drawInstances n obj@(GlyphObject bo co vAttr nAttr cAttr tAttr _ setup1 setup2 t
           liftMaybe _ = Nothing
 
 instance (Show a) => Show (GlyphObject a) where
-    show (GlyphObject _ co vAttr nAttr cAttr tAttr res _ _ _ p) =
+    show (GlyphObject _ co vAttr nAttr cAttr tAttr res _ _ _ p n) =
         "[GlyphObject compiled=" ++! co ++ " vertAttr=" ++! vAttr ++
-            " normalAttr="++!nAttr++" colorAttr="++!cAttr++" textureAttr="++!tAttr++" res="++!res++" PrimitiveMode="++!p++"]"
+            " normalAttr="++!nAttr++" colorAttr="++!cAttr++" textureAttr="++!tAttr++" res="++!res++" PrimitiveMode="++!p++" instances="++!n++"]"
 
 newDefaultGlyphObject :: BuilderM GLfloat x -> a -> IO (GlyphObject a)
 newDefaultGlyphObject builder resources =

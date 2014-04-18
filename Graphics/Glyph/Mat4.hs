@@ -8,13 +8,13 @@ import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
 
-import Graphics.Rendering.OpenGL
+import Graphics.Rendering.OpenGL (GLfloat,Uniform(..),uniform,UniformLocation(..),makeStateVar)
 import Graphics.Rendering.OpenGL.Raw.Core31
 
-data Mat4 a = Matrix (a,a,a,a,
-                      a,a,a,a,
-                      a,a,a,a,
-                      a,a,a,a) | IdentityMatrix
+data Mat4 a = Matrix4 (a,a,a,a,
+                       a,a,a,a,
+                       a,a,a,a,
+                       a,a,a,a) | IdentityMatrix
 
 data Mat3 a = Matrix3 ( a,a,a,
                         a,a,a,
@@ -25,11 +25,46 @@ class StorableMatrix t a where
     toPtr :: a t -> (Ptr t -> IO b) -> IO b
     fromPtr :: Ptr t -> (a t -> IO b) -> IO b
 
+class Mat a where 
+    inverse :: a -> Maybe a
+    transpose :: a -> a
+    determinate :: a -> Double
+    scale :: (Real b) => b -> a -> a
+
+instance (RealFloat a,Eq a) => Mat (Mat4 a) where
+    inverse = inv4
+    transpose = transpose4
+    determinate = det4
+    scale b = scale4 (realToFrac b)
+
+instance (RealFloat a,Eq a) => Mat (Mat3 a) where
+    transpose
+        (Matrix3 (a00,a01,a02,
+                  a10,a11,a12,
+                  a20,a21,a22)) = Matrix3 (a00,a10,a20,a01,a11,a21,a02,a12,a22)
+    determinate
+        (Matrix3 (a11,a12,a13,a21,a22,a23,a31,a32,a33)) =
+            realToFrac $
+                a11*a22*a33+a21*a32*a13+a31*a12*a23-a11*a32*a23-a31*a22*a13-a21*a12*a33
+
+    scale n' (Matrix3 (m11,m12,m13,m21,m22,m23,m31,m32,m33)) =
+        let n = realToFrac n' in
+        Matrix3 (m11*n,m12*n,m13*n,m21*n,m22*n,m23*n,m31*n,m32*n,m33*n)
+
+    inverse
+        m@(Matrix3 (a11,a12,a13,a21,a22,a23,a31,a32,a33)) =
+            let det = determinate m in
+            if det == 0 then Nothing else Just $
+            (1 / determinate m) `scale` Matrix3 (
+                    a22*a33 - a23*a32, a13*a32 - a12*a33, a12*a23 - a13*a22,
+                    a23*a31 - a21*a33, a11*a33 - a13*a31, a13*a21 - a11*a23,
+                    a21*a32 - a22*a31, a12*a31 - a11*a32, a11*a22 - a12*a21)
+
 instance (Storable t) => StorableMatrix t Mat4 where
     fromList (m1:m2:m3:m4:m5:m6:m7:m8:m9:m10:m11:m12:m13:m14:m15:m16:_) =
-        Matrix (m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16)
+        Matrix4 (m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16)
 
-    toPtr (Matrix (m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16)) fun =
+    toPtr (Matrix4 (m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16)) fun =
         allocaArray 16 $ \ptr -> do
             pokeArray ptr [m1,m2,m3,m4,m5,m6,m7,m8,m9,m10,m11,m12,m13,m14,m15,m16]
             fun ptr
@@ -78,7 +113,7 @@ instance (Show a) => Show (Mat4 a) where
         "  0 1 0 0\n" ++
         "  0 0 1 0\n" ++
         "  0 0 0 1 ]\n"
-    show (Matrix (m00,m01,m02,m03,m10,m11,m12,m13,m20,m21,m22,m23,m30,m31,m32,m33)) =
+    show (Matrix4 (m00,m01,m02,m03,m10,m11,m12,m13,m20,m21,m22,m23,m30,m31,m32,m33)) =
         "["++! m00 ++ " " ++! m01 ++ " " ++! m02 ++ " " ++! m03 ++ "\n" ++
         " "++! m10 ++ " " ++! m11 ++ " " ++! m12 ++ " " ++! m13 ++ "\n" ++
         " "++! m20 ++ " " ++! m21 ++ " " ++! m22 ++ " " ++! m23 ++ "\n" ++
@@ -89,18 +124,18 @@ instance (Show a) => Show (Mat4 a) where
     
 
 translateMat4 :: (Num a) => Mat4 a -> (a,a,a,a) -> Mat4 a
-translateMat4 IdentityMatrix x = translateMat4 (Matrix (1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)) x
-translateMat4  (Matrix (m00,m01,m02,m03,
+translateMat4 IdentityMatrix x = translateMat4 (Matrix4 (1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1)) x
+translateMat4  (Matrix4 (m00,m01,m02,m03,
                         m10,m11,m12,m13,
                         m20,m21,m22,m23,
                         m30,m31,m32,m33)) (v0,v1,v2,v3) =
-                Matrix (m00,m01,m02,m03+v0,
+                Matrix4 (m00,m01,m02,m03+v0,
                         m10,m11,m12,m13+v1,
                         m20,m21,m22,m23+v2,
                         m30,m31,m32,m33+v3)
 
 applyMatrix :: (Num a) => Mat4 a -> (a,a,a,a) -> (a,a,a,a)
-applyMatrix  (Matrix (m00,m01,m02,m03,
+applyMatrix  (Matrix4 (m00,m01,m02,m03,
               m10,m11,m12,m13,
               m20,m21,m22,m23,
               m30,m31,m32,m33)) (v0,v1,v2,v3) =
@@ -112,13 +147,13 @@ applyMatrix  (Matrix (m00,m01,m02,m03,
 applyMatrix IdentityMatrix v = v
 
 scaleMatrix :: (Num a) => Mat4 a -> (a,a,a) -> Mat4 a
-scaleMatrix IdentityMatrix (a,b,c) = Matrix ( a,0,0,0,
+scaleMatrix IdentityMatrix (a,b,c) = Matrix4 ( a,0,0,0,
                                0,b,0,0,
                                0,0,c,0,
                                0,0,0,1)
 
-scaleMatrix (Matrix (m00,m01,m02,m03,m10,m11,m12,m13,m20,m21,m22,m23,m30,m31,m32,m33)) (a,b,c)
-                    = Matrix ( m00*a,m01,m02,m03,
+scaleMatrix (Matrix4 (m00,m01,m02,m03,m10,m11,m12,m13,m20,m21,m22,m23,m30,m31,m32,m33)) (a,b,c)
+                    = Matrix4 ( m00*a,m01,m02,m03,
                                m10,m11*b,m12,m13,
                                m20,m21,m22*c,m23,
                                m30,m31,m32,m33)
@@ -135,15 +170,15 @@ mulMatrix4 :: (Num a) => Mat4 a -> Mat4 a -> Mat4 a
 mulMatrix4 IdentityMatrix a = a
 mulMatrix4 a IdentityMatrix = a
 mulMatrix4
-    (Matrix (a00,a01,a02,a03,
+    (Matrix4 (a00,a01,a02,a03,
               a10,a11,a12,a13,
               a20,a21,a22,a23,
               a30,a31,a32,a33 ))
-    (Matrix (b00,b01,b02,b03,
+    (Matrix4 (b00,b01,b02,b03,
               b10,b11,b12,b13,
               b20,b21,b22,b23,
               b30,b31,b32,b33 )) =
-                Matrix  (b00*a00+b10*a01+b20*a02+b30*a03,
+                Matrix4  (b00*a00+b10*a01+b20*a02+b30*a03,
                          b01*a00+b11*a01+b21*a02+b31*a03,
                          b02*a00+b12*a01+b22*a02+b32*a03,
                          b03*a00+b13*a01+b23*a02+b33*a03,
@@ -167,31 +202,32 @@ mulMatrix4
 (|*|) = mulMatrix4
 
 transpose4 :: Mat4 a -> Mat4 a
-transpose4 (Matrix
+transpose4 (Matrix4
                 (m00,m01,m02,m03,
                  m10,m11,m12,m13,
                  m20,m21,m22,m23,
-                 m30,m31,m32,m33 ))  = (Matrix (m00, m10, m20, m30,
+                 m30,m31,m32,m33 ))  = (Matrix4 (m00, m10, m20, m30,
                                                 m01, m11, m21, m31,
                                                 m02, m12, m22, m32,
                                                 m03, m13, m23, m33))
 scale4 :: (Num a) => a -> Mat4 a -> Mat4 a
-scale4 n (Matrix (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m44)) =
-    Matrix (m11*n,m12*n,m13*n,m14*n,m21*n,m22*n,m23*n,m24*n,m31*n,m32*n,m33*n,m34*n,m41*n,m42*n,m43*n,m44*n)
+scale4 n (Matrix4 (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m44)) =
+    Matrix4 (m11*n,m12*n,m13*n,m14*n,m21*n,m22*n,m23*n,m24*n,m31*n,m32*n,m33*n,m34*n,m41*n,m42*n,m43*n,m44*n)
 
-det4 :: (Num a) => Mat4 a -> a
-det4 (Matrix (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m44)) =
-          m11*m22*m33*m44 + m11*m23*m34*m42 + m11*m24*m32*m43
-        + m12*m21*m34*m43 + m12*m23*m31*m44 + m12*m24*m33*m41
-        + m13*m21*m32*m44 + m13*m22*m34*m41 + m13*m24*m31*m42
-        + m14*m21*m33*m42 + m14*m22*m31*m43 + m14*m23*m32*m41
-        - m11*m22*m34*m43 - m11*m23*m32*m44 - m11*m24*m33*m42
-        - m12*m21*m33*m44 - m12*m23*m34*m41 - m12*m24*m31*m43
-        - m13*m21*m34*m42 - m13*m22*m31*m44 - m13*m24*m32*m41
-        - m14*m21*m32*m43 - m14*m22*m33*m41 - m14*m23*m31*m42
+det4 :: (Real a,Fractional b) => Mat4 a -> b
+det4 (Matrix4 (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m44)) =
+        realToFrac $
+            m11*m22*m33*m44 + m11*m23*m34*m42 + m11*m24*m32*m43
+            + m12*m21*m34*m43 + m12*m23*m31*m44 + m12*m24*m33*m41
+            + m13*m21*m32*m44 + m13*m22*m34*m41 + m13*m24*m31*m42
+            + m14*m21*m33*m42 + m14*m22*m31*m43 + m14*m23*m32*m41
+            - m11*m22*m34*m43 - m11*m23*m32*m44 - m11*m24*m33*m42
+            - m12*m21*m33*m44 - m12*m23*m34*m41 - m12*m24*m31*m43
+            - m13*m21*m34*m42 - m13*m22*m31*m44 - m13*m24*m32*m41
+            - m14*m21*m32*m43 - m14*m22*m33*m41 - m14*m23*m31*m42
 
-inv4 :: (Floating a,Eq a) => Mat4 a -> Maybe (Mat4 a)
-inv4 mat@(Matrix (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m44)) =
+inv4 :: (RealFloat a,Eq a) => Mat4 a -> Maybe (Mat4 a)
+inv4 mat@(Matrix4 (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m44)) =
         let b11 = m22*m33*m44 + m23*m34*m42 + m24*m32*m43 - m22*m34*m43 - m23*m32*m44 - m24*m33*m42
             b12 = m12*m34*m43 + m13*m32*m44 + m14*m33*m42 - m12*m33*m44 - m13*m34*m42 - m14*m32*m43
             b13 = m12*m23*m44 + m13*m24*m42 + m14*m22*m43 - m12*m24*m43 - m13*m22*m44 - m14*m23*m42
@@ -210,14 +246,14 @@ inv4 mat@(Matrix (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m4
             b44 = m11*m22*m33 + m12*m23*m31 + m13*m21*m32 - m11*m23*m32 - m12*m21*m33 - m13*m22*m31 in
             case det4 mat of
                 0 -> Nothing
-                det -> Just $ (1 / det) `scale4` Matrix (b11,b12,b13,b14,b21,b22,b23,b24,b31,b32,b33,b34,b41,b42,b43,b44)
+                det -> Just $ (1 / det) `scale4` Matrix4 (b11,b12,b13,b14,b21,b22,b23,b24,b31,b32,b33,b34,b41,b42,b43,b44)
 
 trunc4 :: Mat4 a -> Mat3 a
-trunc4 (Matrix
+trunc4 (Matrix4
         (m11,m12,m13,_,
          m21,m22,m23,_,
          m31,m32,m33,_,
           _ , _ , _ ,_)) = Matrix3 (m11,m12,m13,m21,m22,m23,m31,m32,m33)
 
-toNormalMatrix :: (Floating a,Eq a) => Mat4 a -> Maybe (Mat3 a)
+toNormalMatrix :: (RealFloat a,Eq a) => Mat4 a -> Maybe (Mat3 a)
 toNormalMatrix mat = inv4 mat >>= return . trunc4 . transpose4

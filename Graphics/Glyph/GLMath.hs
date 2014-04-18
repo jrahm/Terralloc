@@ -5,6 +5,7 @@ module Graphics.Glyph.GLMath where
     import qualified Graphics.Rendering.OpenGL as GL
     import Graphics.Rendering.OpenGL (GLfloat,Uniform,Vertex3(..),uniform,UniformComponent)
     import Data.Angle
+    import Data.Maybe
     import Debug.Trace
 
     data Vec2 a = Vec2 (a,a) deriving Show
@@ -86,7 +87,7 @@ module Graphics.Glyph.GLMath where
         let f@(Vec3 (fx,fy,fz)) = normalize (c <-> e)
             s@(Vec3 (sx,sy,sz)) = normalize (f × u)
             u'@(Vec3 (ux,uy,uz))   = s × f in 
-               Matrix (sx, ux, -fx, 0,
+               Matrix4 (sx, ux, -fx, 0,
                        sy, uy, -fy, 0,
                        sz, uz, -fz, 0,
                        -(s<.>e) , -(u'<.>e),  (f<.>e),  1 )
@@ -101,7 +102,7 @@ module Graphics.Glyph.GLMath where
             res23 = - 1
             res32 = - (2 * zf * zn) / (zf - zn) in
         trace ("res22=" ++ (show res22)) $
-        Matrix (res00, 0, 0, 0,
+        Matrix4 (res00, 0, 0, 0,
                 0, res11, 0, 0,
                 0, 0, res22, res23,
                 0, 0, res32, 0)
@@ -133,7 +134,7 @@ module Graphics.Glyph.GLMath where
         mat -*| tmp = glslMatMul mat tmp
 
     glslMatMul :: (Num a) => Mat4 a -> Vec4 a -> Vec4 a
-    glslMatMul (Matrix (m00,m01,m02,m03,
+    glslMatMul (Matrix4 (m00,m01,m02,m03,
                 m10,m11,m12,m13,
                 m20,m21,m22,m23,
                 m30,m31,m32,m33)) (Vec4 (v0,v1,v2,v3)) =
@@ -142,16 +143,19 @@ module Graphics.Glyph.GLMath where
                            v0 * m02 + v1 * m12 + v2 * m22 + v3 * m32,
                            v0 * m03 + v1 * m13 + v2 * m23 + v3 * m33 )
 
+    glslModelViewToNormalMatrix :: Mat4 GLfloat -> Mat3 GLfloat
+    glslModelViewToNormalMatrix = fromJust.inverse.transpose.trunc4
+
     (==>) :: (Num a) => Mat4 a -> Vec4 a -> Mat4 a
     (==>) = glslMatTranslate
     glslMatTranslate :: (Num a) => Mat4 a -> Vec4 a -> Mat4 a
     glslMatTranslate
-        mat@(Matrix (m00,m01,m02,m03,
+        mat@(Matrix4 (m00,m01,m02,m03,
                 m10,m11,m12,m13,
                 m20,m21,m22,m23,
                 m30,m31,m32,m33)) vec =
                     let (Vec4 (v0,v1,v2,v3)) = mat -*| vec in
-                    (Matrix (m00,m01,m02,m03,
+                    (Matrix4 (m00,m01,m02,m03,
                              m10,m11,m12,m13,
                              m20,m21,m22,m23,
                              m30+v0,m31+v1,m32+v2,m33+v3))

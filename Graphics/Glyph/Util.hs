@@ -1,3 +1,6 @@
+{-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}
+
 module Graphics.Glyph.Util where
 
 import Data.Angle
@@ -5,9 +8,16 @@ import Graphics.Rendering.OpenGL
 import Data.Maybe
 import Data.Char
 import Data.Either
+
 import Control.Exception
+import Control.Monad
 
 import Data.Foldable as Fold
+
+import Foreign.Ptr
+import Foreign.Marshal.Alloc
+
+import Data.Array.MArray
 
 if' :: Bool -> a -> a -> a
 if' True a _ = a
@@ -15,6 +25,9 @@ if' False _ a = a
 
 (?) :: Bool -> a -> a -> a
 (?) = if'
+
+flipIf :: a -> a -> Bool -> a
+flipIf a b c = if c then a else b
 
 int :: (Integral a, Num b) => a -> b
 int = fromIntegral 
@@ -118,6 +131,9 @@ zipWithT3 fu (a, b, c) (d, e, f) = (fu a d, fu b e, fu c f)
 
 zipWithT4 :: (a -> b -> c) -> (a,a,a,a) -> (b,b,b,b) -> (c,c,c,c)
 zipWithT4 fu (a, b, c, d) (e, f, g, h) = (fu a e, fu b f, fu c g, fu d h)
+
+zipWithT5 :: (a -> b -> c) -> (a,a,a,a,a) -> (b,b,b,b,b) -> (c,c,c,c,c)
+zipWithT5 fu (a, b, c, d, i) (e, f, g, h, j) = (fu a e, fu b f, fu c g, fu d h, fu i j)
 
 toFloating :: (Real a, Floating b) => a -> b
 toFloating = fromRational . toRational
@@ -237,6 +253,12 @@ dFold _ next _ = next
 (!>>=) :: Monad m => m a -> (a -> m b) -> m b
 (!>>=) a f = a !>> (flip (>>=) f)
 
+{- Objective function composition. Useful to say
+ - (drawArrays <..> numInstances) obj
+ -}
+(<..>) :: (b -> a -> c) -> (a -> b) -> a -> c
+(<..>) f1 f2 a = f1 (f2 a) a
+
 toHex :: (Integral a,Show a) => a -> String
 toHex n | n == 0 = ""
         | otherwise = 
@@ -255,3 +277,32 @@ maybeDefault a b = fromJust $ b >||> Just a
 maybeDefaultM :: (Monad m) => Maybe a -> (a -> m ()) -> m () -> m ()
 maybeDefaultM Nothing _ a = a
 maybeDefaultM (Just a) b _ = b a
+
+data MonadPlusBuilder a b  = MonadPlusBuilder a b
+
+plusM :: a -> MonadPlusBuilder a ()
+plusM a = MonadPlusBuilder a ()
+
+runMonadPlusBuilder :: MonadPlusBuilder a b -> a
+runMonadPlusBuilder (MonadPlusBuilder !a _) = a
+
+instance (MonadPlus a) => Monad (MonadPlusBuilder (a b)) where
+    return x = MonadPlusBuilder mzero x
+    MonadPlusBuilder a1 _ >> MonadPlusBuilder a2 b = MonadPlusBuilder (a1 `mplus` a2) b
+    builder@(MonadPlusBuilder _ b) >>= f = builder >> f b
+    fail = undefined
+
+untilM2 :: (Monad m) => (a -> m Bool) -> a -> (a -> m a) -> m a
+untilM2 cond ini bod = do
+    bool <- cond ini 
+    if bool then return ini
+        else  bod ini >>= \newini -> untilM2 cond newini bod
+
+(<!>) :: (MArray a e IO, Ix i) => a i e -> i -> StateVar e
+(<!>) arr idx = 
+    let setter = writeArray arr idx
+        getter = readArray arr idx in
+        makeStateVar getter setter
+
+for :: [a] -> (a -> b) -> [b]
+for = flip map

@@ -1,5 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Main where
 
 import Graphics.Rendering.OpenGL as GL
@@ -17,6 +19,9 @@ import Data.Word
 import Data.Array
 import Data.Array.IO
 
+import Data.Sequence as Seq
+import Prelude as P
+
 import Debug.Trace
 import Data.Bits
 
@@ -28,7 +33,7 @@ import Debug.Trace
 
 
 data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
-                Tundra | Unknown deriving Enum
+                Tundra | Unknown deriving (Enum,Eq)
 $(makeShow ''TileType)
 
 
@@ -56,25 +61,101 @@ buildArray terrain height =
             putStrLn $ show (head list)
             return $ listArray ((0,0),(w-1,h-1)) list
 
+-- colors regions of water in the array
+colorArray :: Array (Int,Int) Tile -> IO (IOArray (Int,Int) Int)
+colorArray marr = do
+    let pollseq (Seq.viewl -> (head :< tail)) = (head,tail)
+    let bnd@(_,(w,h)) = bounds marr
+    ret <- newArray bnd 0
+    let myfunction place = do
+            val <- readArray ret place
+            case marr ! place of
+                (Tile Water _) -> return $ val==0
+                _ -> return False
+    let floodfill :: (Int,Int) -> ((Int,Int) -> IO Bool) -> Int -> IO ()
+        floodfill start func' val = do
+            let func t@(x,y) = if not (x <= w && x >= 0 && y <= h && y >= 0) then return False else func' t
+            _ <- untilM2 (return . Seq.null) (Seq.singleton start) $ \queue -> do
+                    let (head',tail') = pollseq queue
+                    bool <- func head'
+                    if not bool then return tail' else do
+                        (_,tail2) <- untilM2 (liftM not . func . fst) (head',tail') $ \((x,y),queue') -> do
+                            (ret <!> (x,y)) $= val
+                            return ((x+1,y),queue' |> (x,y-1) |> (x,y+1))
+                        (_,tail3) <- untilM2 (liftM not . func . fst) (head',tail2) $ \((x,y),queue') -> do
+                            (ret <!> (x,y)) $= val
+                            return ((x-1,y), queue' |> (x,y-1) |> (x,y+1))
+                        return tail3
+            return ()
+    foldM_ (\val place -> do
+        bool <- myfunction place
+        if bool then do
+            floodfill place myfunction val
+            return $ val+1
+            else return val
+        ) 1 [(x,y) | x <- [0..w], y <- [0..h]]
+    return ret
+
+-- elevation quad is corner verticices
+getWaterQuads :: Array (Int,Int) Tile -> IOArray (Int,Int) Int -> IO ( BuilderM GLfloat () )
+getWaterQuads marr arr = do
+    let (_,(w,h)) = bounds marr
+    let elevationCacheIO :: IO (Map.Map Int (Int,Int,Int,Int,Int))
+        elevationCacheIO = do
+            let tup = (max,max,max,min,min)
+            foldM (\themap (x,y) -> do
+                    bodyID <- readArray arr (x,y)
+                    if bodyID == 0 then return themap else do
+                        let elev = elevation $ marr ! (x,y) :: Int
+                        let newmap = Map.insertWith (\old->
+                                            zipWithT5 (P.$) (zipWithT5 (P.$) tup old)
+                                        ) bodyID (elev,x,y,x,y) themap
+                        return newmap
+                ) (Map.empty::Map.Map Int (Int,Int,Int,Int,Int)) [(x,y) | x <- [0..w], y <- [0..h]]
+
+    dat <- (liftM Map.toList elevationCacheIO)
+    return . sequence_ $ for dat $ \(_, (elev,maxx,maxy,minx,miny)) -> do
+        let relev = (fromIntegral elev) / 10
+            mxx = fromIntegral maxx
+            mnx = fromIntegral minx
+            mxy = fromIntegral maxy
+            mny = fromIntegral miny
+        mapM_ bVertex3 $ trianglesFromQuads
+            [(mxx,relev,mxy),
+             (mxx,relev,mny),
+             (mnx,relev,mny),
+             (mnx,relev,mxy)] 
+
+
 printArray :: Array (Int,Int) Tile -> IO ()
 printArray arr = do
     let (_,(w,h)) = bounds arr
-    putStrLn $ "w=" ++! w
-    putStrLn $ "h=" ++! h
-    forM_ [0..h-1] $ \y -> do
-        forM_ [0..w-1] $ \x -> do
+    putStrLn $ "w=" ++! (w+1)
+    putStrLn $ "h=" ++! (h+1)
+    forM_ [0..h] $ \y -> do
+        forM_ [0..w] $ \x -> do
             let next = arr ! (x,y)
             putStr $ (show $ tileType next) 
         putStr "    "
-        forM_ [0..w-1] $ \x -> do
+        forM_ [0..w] $ \x -> do
             let next = arr ! (x,y)
             putStr $ (elevShow $ elevation next) 
         putStrLn ""
     where elevShow x = 
-            let len = length elevMap
+            let len = P.length elevMap
                 nx = x `div` 5 in
-            if nx > len then "=" else [elevMap !! nx]
+            if nx >= len then "=" else [elevMap !! nx]
           elevMap = "`.,-~*<:!;%&#@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
+printShowArray arr = do
+    (_,(w,h)) <- getBounds arr
+    putStrLn $ "w=" ++! (w+1)
+    putStrLn $ "h=" ++! (h+1)
+    forM_ [0..h] $ \y -> do
+        forM_ [0..w] $ \x -> do
+            next <- readArray arr (x,y)
+            putStr $ (show $ next) 
+        putStrLn ""
 
 toColor :: TileType -> (GLfloat,GLfloat,GLfloat,GLfloat)
 toColor Tundra = (0.5,0.5,0.5,1.0)
@@ -119,43 +200,47 @@ createBuilder arr = do
             bTexture2 (f x / 10.0, f z / 10.0)
             bVertex3 (f x, y,f z)
             
-createForestBuilder :: Array (Int,Int) Tile -> StdGen -> ObjectFile GLfloat -> BuilderM GLfloat ()
-createForestBuilder arr gen file = do
-
+createLocations :: Array (Int,Int) Tile -> StdGen -> Int -> TileType -> MonadPlusBuilder (Seq.Seq GLfloat) ()
+createLocations arr gen density typ = do
     let (_,(w,h)) = bounds arr
     let getElev x y = if x >= w || y >= h || x < 0 || y < 0 then 0 else fromIntegral (elevation $ arr ! (x,y)) /10.0
-    let !treeF = 
-         trace "build tree" $
-            basicBuildObject file
 
-    let run :: [Int] -> (Int,Int) -> BuilderM GLfloat [Int]
+    let run :: [Int] -> (Int,Int) -> MonadPlusBuilder ( Seq.Seq GLfloat ) [Int]
         run rs (x,y) = do
-            let ((_:he), t) = splitAt (head rs `mod` 13 + 1) rs
+            let ((_:he), t) = P.splitAt (head rs `mod` density + 1) rs
             let signum' = floor.signum
 
-            when (isForest x y) $ do
+            when (isType x y typ) $ do
                 forM_ he $ \rand -> do
-                    let (a,b,_) = mapT3 f (toTup rand)
+                    let (a',b',c) = toTup rand
+                    let (a,b) = (f a', f b')
+                    let [sx,sy,sz,rot,noise] = (P.take 5 $ randomRs (0.0,1.0) $ mkStdGen c)
+
                     let elev = getElev x y
                     let elev_dx = getElev (x + signum' a) y
                     let elev_dy = getElev x (y + signum' b)
                     let realelev =
                          ((elev * (1-abs a) + elev_dx * (abs a)) +
                           (elev * (1-abs b) + elev_dy * (abs b))) / 2.0
-                    when (elev_dx > 0 && elev_dy > 0) $ do
-                        translating (fromIntegral x+a,realelev,fromIntegral y+b) $ do
-                            treeF
-                            
 
+                    when (elev_dx > 0 && elev_dy > 0) $
+                            plusM $ Seq.fromList [
+                                    -- translation
+                                    fromIntegral x+a,realelev,fromIntegral y+b,
+                                    -- scale
+                                    sx+0.5,sy+0.5,sz+0.5,
+                                    -- rotation
+                                    sin (rot*6.4), cos(rot*6.4),
+                                    -- noise
+                                    noise*6.4
+                                ]
             return t
 
-    _ <- foldM run (randoms gen) [(x,y) | x <- [1..w], y <- [1..h]]
+    foldM_ run (randoms gen) [(x,y) | x <- [1..w], y <- [1..h]]
 
     return ()
-    where isForest x y =
-            case tileType $ arr ! (x,y) of
-                Forest -> True
-                _ -> False
+    where isType x y t =
+            (tileType $ arr ! (x,y)) == t
           f x = (fromIntegral x - 128) / 128 * (sqrt 2 / 2)
           toTup x = ( (x .&. 0xFF),
                       (x `shiftR` 8) .&. 0xFF,
@@ -171,11 +256,20 @@ main = do
 
     arr <- buildArray terrain height
     putStrLn "Array Built"
-    -- printArray arr
+    printArray arr
+    coloredArr <- colorArray arr
+    printShowArray coloredArr
 
     surface <- simpleStartup "Spectical" (640,480)
     stgen <- newStdGen
-    (log',file) <- loadObjFile "tree.obj"
-    mapM_ putStrLn log'
+    stgen2 <- newStdGen
+--    (log',file) <- loadObjFile "tree.obj"
+--    mapM_ putStrLn log'
 
-    makeResources surface (createBuilder arr) (createForestBuilder arr stgen file) >>= startPipeline reshape eventHandle displayHandle updateHandle;
+    let !forestLocations = runMonadPlusBuilder $ createLocations arr stgen 7 Forest
+    let !jungleLocations = runMonadPlusBuilder $ createLocations arr stgen2 2 Jungle
+
+    water <- getWaterQuads arr coloredArr
+--  putStrLn $ "ForestLocations :" ++! forestLocations
+    makeResources surface (createBuilder arr) forestLocations jungleLocations water
+        >>= startPipeline reshape eventHandle displayHandle updateHandle;
