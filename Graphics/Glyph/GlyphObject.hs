@@ -33,7 +33,7 @@ module Graphics.Glyph.GlyphObject (
 import Graphics.Glyph.BufferBuilder
 import Graphics.Glyph.Util
 import Graphics.Rendering.OpenGL
-import Graphics.Glyph.ExtendedGL
+import Graphics.Glyph.ExtendedGL as Ex
 import Data.Setters
 
 import Control.Monad
@@ -55,7 +55,7 @@ data GlyphObject a = GlyphObject {
     setupRoutine :: (Maybe (GlyphObject a -> IO ())), -- Setup
     setupRoutine2 :: (Maybe (GlyphObject a -> IO ())), -- Setup
     teardownRoutine :: (Maybe (GlyphObject a -> IO ())), -- Tear down
-    primitiveMode :: PrimitiveMode,
+    primitiveMode :: ExPrimitiveMode,
     numInstances :: Int
 }
 
@@ -87,7 +87,7 @@ getSetupRoutine = setupRoutine
 getTeardownRoutine :: GlyphObject a -> (Maybe (GlyphObject a -> IO ()))
 getTeardownRoutine = teardownRoutine
 
-getPrimitiveMode :: GlyphObject a -> PrimitiveMode
+getPrimitiveMode :: GlyphObject a -> ExPrimitiveMode
 getPrimitiveMode = primitiveMode
 
 newGlyphObject :: BuilderM GLfloat x ->
@@ -98,7 +98,7 @@ newGlyphObject :: BuilderM GLfloat x ->
     a ->
     Maybe (GlyphObject a -> IO ()) ->
     Maybe (GlyphObject a -> IO ()) ->
-    PrimitiveMode ->
+    ExPrimitiveMode ->
     IO (GlyphObject a)
 
 newGlyphObject builder vertAttr normAttr colorAttr textureAttr res setup tear mode = do
@@ -164,7 +164,7 @@ newDefaultGlyphObject builder resources =
                                        resources
                                        Nothing -- setup
                                        Nothing -- teardown
-                                       Triangles -- primitive
+                                       Ex.Triangles -- primitive
 
 newDefaultGlyphObjectWithClosure :: BuilderM GLfloat x -> a -> (GlyphObject a -> IO ()) -> IO (GlyphObject a)
 newDefaultGlyphObjectWithClosure builder res func =

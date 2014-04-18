@@ -1,6 +1,7 @@
 module Graphics.Glyph.ExtendedGL where
 
-import Graphics.Rendering.OpenGL
+import Graphics.Rendering.OpenGL hiding (Points,Lines,Triangles)
+import qualified Graphics.Rendering.OpenGL as GL
 import Graphics.Rendering.OpenGL.Raw.Core31
 import Graphics.Rendering.OpenGL.Raw.ARB
 
@@ -12,20 +13,33 @@ import Foreign.C.Types
 import System.IO.Unsafe
 import Control.Monad
 
-marshalPrimitiveMode :: PrimitiveMode -> GLenum
-marshalPrimitiveMode x = case x of
-   Points -> 0x0
-   Lines -> 0x1
-   LineLoop -> 0x2
-   LineStrip -> 0x3
-   Triangles -> 0x4
-   TriangleStrip -> 0x5
-   TriangleFan -> 0x6
-   Quads -> 0x7
-   QuadStrip -> 0x8
-   Polygon -> 0x9
+data ExPrimitiveMode = Points | Triangles | Lines | Patches deriving (Show,Enum)
 
-drawArraysInstanced :: PrimitiveMode -> ArrayIndex -> NumArrayIndices -> GLsizei -> IO ()
+class IsPrimitiveModeMarshallable a where
+    marshalPrimitiveMode :: a -> GLuint
+
+instance IsPrimitiveModeMarshallable ExPrimitiveMode where
+    marshalPrimitiveMode x = case x of
+        Points    -> gl_POINTS
+        Triangles -> gl_TRIANGLES
+        Lines     -> gl_LINES
+        Patches   -> gl_PATCHES
+
+instance IsPrimitiveModeMarshallable PrimitiveMode where
+    marshalPrimitiveMode x = case x of
+        GL.Points -> 0x0
+        GL.Lines -> 0x1
+        GL.LineLoop -> 0x2
+        GL.LineStrip -> 0x3
+        GL.Triangles -> 0x4
+        GL.TriangleStrip -> 0x5
+        GL.TriangleFan -> 0x6
+        GL.Quads -> 0x7
+        GL.QuadStrip -> 0x8
+        GL.Polygon -> 0x9
+
+drawArraysInstanced :: 
+    (IsPrimitiveModeMarshallable a) => a -> ArrayIndex -> NumArrayIndices -> GLsizei -> IO ()
 drawArraysInstanced = glDrawArraysInstanced . marshalPrimitiveMode
 
 vertexAttributeDivisor :: AttribLocation -> SettableStateVar GLuint

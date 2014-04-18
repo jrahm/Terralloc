@@ -18,7 +18,7 @@ import Graphics.SDL.SDLHelp
 import Graphics.Glyph.BufferBuilder
 import Graphics.Glyph.Mat4
 import Graphics.Glyph.Util
-import Graphics.Glyph.ExtendedGL
+import Graphics.Glyph.ExtendedGL as Ex
 import Graphics.Rendering.OpenGL as GL
 import Graphics.Rendering.OpenGL.Raw.Core31
 
@@ -195,10 +195,13 @@ displayHandle resources = do
         return ()
 
     draw $ prepare (waterObj resources) $ \_ -> do
+        patchVertices $= 3
         uniform (UniformLocation 4) $= pMatrix resources
         uniform (UniformLocation 5) $= l_mvMatrix
         uniform (UniformLocation 7) $= normalMatrix
         uniform (UniformLocation 8) $= l_mvMatrix `glslMatMul` lightPos
+        uniform (UniformLocation 9) $= Index1 ((fromIntegral $ time resources) / 20::GLfloat)
+        uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
         return ()
 
     SDL.glSwapBuffers
@@ -315,7 +318,9 @@ makeResources surf builder forestB jungleB water = do
          (Just ("shaders/water.tcs","shaders/water.tes"))
          (Nothing::Maybe String) "shaders/water.vert" "shaders/water.frag"
     waterTexture <- load "textures/water.jpg" >>= textureFromSurface
+    skyTexture <- load "textures/skybox_top.png" >>= textureFromSurface
     location <- get (uniformLocation waterProg "texture")
+    skyLocation <- get (uniformLocation waterProg "skytex") 
     Resources 
         <$> pure surf
         <*> do CameraPosition
@@ -331,9 +336,10 @@ makeResources surf builder forestB jungleB water = do
         <*> buildTerrainObject builder
         <*> buildForestObject forestB "tree.obj" "textures/wood_low.png"
         <*> buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png"
-        <*> (newDefaultGlyphObjectWithClosure water () $ \_ -> do
+        <*> (liftM (setPrimitiveMode Ex.Patches) $ newDefaultGlyphObjectWithClosure water () $ \_ -> do
                 currentProgram $= Just waterProg
                 setupTexturing waterTexture location 0
+                setupTexturing skyTexture skyLocation 1
                 )
         <*> pure 0
         <*> pure 1

@@ -18,25 +18,30 @@ class IsShaderSource a where
     loadShader :: ShaderType -> a -> IO (String, Maybe Shader)
 
 instance IsShaderSource FilePath where
-    loadShader typ path = loadShader typ =<< BS.readFile path
+    loadShader typ path = loadShaderBS path typ =<< BS.readFile path
 
 instance IsShaderSource BS.ByteString where
-    loadShader typ src = do
-        shader <- createShader typ
-        shaderSourceBS shader $= src
-        compileShader shader
-    
-        ok <- get (compileStatus shader)
-        infoLog <- get (shaderInfoLog shader)
-    
-        unless ok $
-            deleteObjectNames [shader]
-    
-        return ( infoLog, if not ok then Nothing else Just shader );
+    loadShader = loadShaderBS "Inlined"
 
 instance IsShaderSource BSL.ByteString where
     loadShader typ = loadShader typ . toStrict
         where toStrict = BS.concat . BSL.toChunks
+
+loadShaderBS :: String -> ShaderType -> BS.ByteString -> IO (String, Maybe Shader)
+loadShaderBS ctx typ src = do
+    shader <- createShader typ
+    shaderSourceBS shader $= src
+    compileShader shader
+
+    ok <- get (compileStatus shader)
+    infoLog <- get (shaderInfoLog shader)
+
+    unless ok $
+        deleteObjectNames [shader]
+
+    if not ok then
+        return ( unlines $ map ((ctx ++ " " ++ show typ ++ ": ")++) $ lines infoLog, Nothing )
+        else return ( infoLog, Just shader );
 
 
 {- Load multiple shaders -}
