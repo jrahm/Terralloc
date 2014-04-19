@@ -62,8 +62,8 @@ data Resources = Resources {
     mvMatrix :: Mat4 GLfloat,
 
     object :: GlyphObject (),
-    forest :: GlyphObject (),
-    jungle :: GlyphObject (),
+    forest :: Maybe (GlyphObject ()),
+    jungle :: Maybe (GlyphObject ()),
     waterObj  :: GlyphObject (),
 
     speed :: Int,
@@ -122,11 +122,17 @@ eventHandle event res = do
         KeyUp (Keysym SDLK_s _ _) ->
             return $ setSpeed (speed res + 1) res
 
+        KeyUp (Keysym SDLK_g _ _) -> do
+            SDL.showCursor False
+            SDL.grabInput True
+            return res
         KeyUp (Keysym SDLK_f _ _) -> do
             ret <- reshape 1920 1080 res
             SDL.toggleFullscreen $ rSurface ret
             SDL.showCursor False
+            SDL.grabInput True
             return ret
+
         _ -> return res
 
 displayHandle :: Resources -> IO Resources
@@ -176,25 +182,28 @@ displayHandle resources = do
     blend $= Enabled
     cullFace $= Just Back
     blendFunc $= (GL.SrcAlpha,OneMinusSrcAlpha)
-    draw $ prepare (forest resources) $ \_ -> do
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
-        uniform (UniformLocation 9) $= normalMatrix
 
-        uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
+    when (isJust $ forest resources) $
+        draw $ prepare (fromJust $ forest resources) $ \_ -> do
+            uniform (UniformLocation 5) $= l_mvMatrix
+            uniform (UniformLocation 4) $= pMatrix resources
+            uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
+            uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
+            uniform (UniformLocation 9) $= normalMatrix
+    
+            uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
+            return ()
 
-    draw $ prepare (jungle resources) $ \_ -> do
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
-        uniform (UniformLocation 9) $= normalMatrix
-
-        uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
+    when (isJust $ jungle resources) $ do
+        draw $ prepare (fromJust $ jungle resources) $ \_ -> do
+            uniform (UniformLocation 5) $= l_mvMatrix
+            uniform (UniformLocation 4) $= pMatrix resources
+            uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
+            uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
+            uniform (UniformLocation 9) $= normalMatrix
+    
+            uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
+            return ()
 
     cullFace $= Nothing
     draw $ prepare (waterObj resources) $ \_ -> do
@@ -269,8 +278,10 @@ buildTerrainObject builder = do
                     uniform dYlocation $= Index1 (dy::GLfloat)
                     printErrors "terrainObjectClosure"
 
-buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (GlyphObject ())
-buildForestObject seq obj tex = do
+buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (Maybe (GlyphObject ()))
+buildForestObject seq obj tex =
+    if Seq.null seq then return Nothing else liftM Just $
+    do
     let bufferIO :: IO BufferObject
         bufferIO = (newArray . Fold.toList) seq >>= ptrToBuffer ArrayBuffer (Seq.length seq * 4)
     

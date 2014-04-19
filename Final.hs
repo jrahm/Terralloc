@@ -288,6 +288,7 @@ main = do
     let !forestLocations = runMonadPlusBuilder $ createLocations arr stgen 7 Forest
     let !jungleLocations = runMonadPlusBuilder $ createLocations arr stgen2 2 Jungle
 
+    putStrLn $ "Jungle locations: " ++! jungleLocations
     water <- getWaterQuads arr coloredArr
 --  putStrLn $ "ForestLocations :" ++! forestLocations
     makeResources surface (createBuilder arr) forestLocations jungleLocations water
