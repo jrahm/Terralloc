@@ -61,16 +61,27 @@ data Resources = Resources {
     pMatrix :: Mat4 GLfloat,
     mvMatrix :: Mat4 GLfloat,
 
-    object :: GlyphObject (),
-    forest :: GlyphObject (),
-    jungle :: GlyphObject (),
-    waterObj  :: GlyphObject (),
+    routines :: [ResourcesClosure -> IO ()],
+    -- object :: GlyphObject (),
+    -- forest :: GlyphObject (),
+    -- jungle :: GlyphObject (),
+    -- waterObj  :: GlyphObject (),
 
     speed :: Int,
     timeSpeed :: Int,
-    time :: Int,
-    rSkyboxObject :: GlyphObject (UniformLocation,UniformLocation)
+    time :: Int
 }
+
+data ResourcesClosure = ResourcesClosure {
+      rcMVMatrix :: Mat4 GLfloat
+    , rcPMatrix  :: Mat4 GLfloat
+    , rcLightPos :: Vec4 GLfloat
+    , rcTime     :: GLfloat
+    , rcNormalMatrix  :: Mat3 GLfloat
+    , rcGlobalAmbient :: Vec4 GLfloat
+    , rcCameraPos :: CameraPosition
+}
+
 $(declareSetters ''Resources)
 
 buildMVMatrix :: CameraPosition -> Mat4 GLfloat
@@ -133,79 +144,31 @@ displayHandle :: Resources -> IO Resources
 displayHandle resources = do
     let cameraPos@(CameraPosition _ th ph) = rPosition resources
     let lighty = ((/10) . fromIntegral . time) resources
-
     let logist c =  (1 / (1 + 2.71828**(-c*x))) * 0.9 + 0.1
             where x = sine $ Degrees (lighty)
-
-    let _'::(GLfloat,GLfloat,GLfloat,GLfloat)
-        _'@(r,g,b,a)= ( logist 2+0.1, logist 10, (logist 15) + 0.1,(sine.Degrees) lighty)
+    let globalAmbient::(GLfloat,GLfloat,GLfloat,GLfloat)
+        globalAmbient@(r,g,b,a)= ( logist 2+0.1, logist 10, (logist 15) + 0.1,(sine.Degrees) lighty)
+    let lightPos = Vec4( 50,
+                         1000000 * (sine.Degrees $ lighty),
+                         -1000000 * (cosine.Degrees . (/10) . fromIntegral . time) resources,
+                         1 )
+    let l_mvMatrix = buildMVMatrix $ cameraPos
+    let normalMatrix = glslModelViewToNormalMatrix l_mvMatrix
 
     clearColor $= Color4 0 0 0 0
     clear [ColorBuffer, DepthBuffer]
     SDL.flip $ rSurface resources
     printErrors "Display"
-    depthFunc $= Nothing
 
-    let lightPos = Vec4( 50,
-                         1000000 * (sine.Degrees $ lighty),
-                         -1000000 * (cosine.Degrees . (/10) . fromIntegral . time) resources,
-                         1 )
 
-    cullFace $= Nothing
-    draw $ prepare (rSkyboxObject resources) $ \this -> do
-        let (matLoc,pmatLoc) = getResources this
-        uniform pmatLoc $= pMatrix resources
-        uniform matLoc $= buildMVMatrix (CameraPosition (Vec3 (0,0,0)) th ph)
-        uniform (UniformLocation 1) $= Vec4 (r,g,b,a)
-
-    vertexProgramPointSize $= Enabled
-    depthFunc $= Just Less
-
-    let l_mvMatrix = buildMVMatrix $ cameraPos
-    let normalMatrix = glslModelViewToNormalMatrix l_mvMatrix
-
-    cullFace $= Just Front
-    draw $ prepare (object resources) $ \_ -> do
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 6) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 7) $= normalMatrix
-        uniform (UniformLocation 8) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
-
-    blend $= Enabled
-    cullFace $= Just Back
-    blendFunc $= (GL.SrcAlpha,OneMinusSrcAlpha)
-    draw $ prepare (forest resources) $ \_ -> do
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
-        uniform (UniformLocation 9) $= normalMatrix
-
-        uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
-
-    draw $ prepare (jungle resources) $ \_ -> do
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
-        uniform (UniformLocation 9) $= normalMatrix
-
-        uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
-
-    cullFace $= Nothing
-    draw $ prepare (waterObj resources) $ \_ -> do
-        patchVertices SV.$= 4
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 7) $= normalMatrix
-        uniform (UniformLocation 8) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 9) $= Index1 ((fromIntegral $ time resources) / 20::GLfloat)
-        uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
+    let rc = ResourcesClosure l_mvMatrix
+                (pMatrix resources)
+                (l_mvMatrix `glslMatMul` lightPos)
+                (fromIntegral $ time resources)
+                (normalMatrix)
+                (Vec4 globalAmbient)
+                cameraPos
+                in mapM_ (Prelude.$rc) $ routines resources
 
     SDL.glSwapBuffers
     return resources
@@ -244,7 +207,7 @@ loadProgramFullSafe' a b c d = do
     when (isNothing progMaybe) $ exitWith (ExitFailure 111)
     return $ fromJust progMaybe
 
-buildTerrainObject :: BuilderM GLfloat b -> IO (GlyphObject ())
+buildTerrainObject :: BuilderM GLfloat b -> IO (ResourcesClosure -> IO ())
 buildTerrainObject builder = do
     let terrainList = map ("terrain/"++)
          [ "forest.png", "beach.png",
@@ -261,16 +224,25 @@ buildTerrainObject builder = do
     dXlocation <- get $ uniformLocation terrainProg "dX"
     dYlocation <- get $ uniformLocation terrainProg "dY"
     putStrLn $ "(dx,dy)=" ++! (dx,dy)
-    newDefaultGlyphObjectWithClosure builder () $ \_ -> do
+    obj <- newDefaultGlyphObjectWithClosure builder () $ \_ -> do
                     currentProgram $= Just terrainProg
                     forM_ (zip [0..] lst) $ \(i,(loc,td)) ->
                         setupTexturing td loc i
                     uniform dXlocation $= Index1 (dx::GLfloat)
                     uniform dYlocation $= Index1 (dy::GLfloat)
                     printErrors "terrainObjectClosure"
+    return $ \rc -> do
+        draw $ prepare obj $ \_ -> do
+            cullFace $= Just Front
+            uniform (UniformLocation 5) $= rcMVMatrix rc
+            uniform (UniformLocation 4) $= rcPMatrix rc
+            uniform (UniformLocation 6) $= rcLightPos rc
+            uniform (UniformLocation 7) $= rcNormalMatrix rc
+            uniform (UniformLocation 8) $= rcGlobalAmbient rc
 
-buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (GlyphObject ())
-buildForestObject seq obj tex = do
+buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (ResourcesClosure -> IO ())
+buildForestObject seq obj tex =
+    if Seq.null seq then return ((const.return) ()) else do
     let bufferIO :: IO BufferObject
         bufferIO = (newArray . Fold.toList) seq >>= ptrToBuffer ArrayBuffer (Seq.length seq * 4)
     
@@ -287,7 +259,7 @@ buildForestObject seq obj tex = do
     dXlocation <- get $ uniformLocation forestProg "dX"
     dYlocation <- get $ uniformLocation forestProg "dY"
 
-    obj <- newDefaultGlyphObjectWithClosure treeF () $ \_ -> do
+    obj' <- newDefaultGlyphObjectWithClosure treeF () $ \_ -> do
                 currentProgram $= Just forestProg
                 setupTexturing woodTexture (UniformLocation 6) 0
                 uniform dXlocation $= (Index1 $ (dx::GLfloat))
@@ -310,13 +282,19 @@ buildForestObject seq obj tex = do
 
                 printErrors "forestClosure"
     putStrLn $ "N trees = " ++! (Seq.length seq `div` 3)
-    return $ setNumInstances (Seq.length seq `div` 3) obj
+    let obj'' = setNumInstances (Seq.length seq `div` 3) obj'
 
-makeResources :: SDL.Surface -> BuilderM GLfloat b ->
-    Seq.Seq GLfloat -> Seq.Seq GLfloat ->
-    BuilderM GLfloat a -> IO Resources
-makeResources surf builder forestB jungleB water = do
-    let pMatrix' = perspectiveMatrix 50 1.8 0.1 100
+    return $ \rc -> do
+        draw $ (prepare obj'') $ \_ -> do
+            uniform (UniformLocation 5) $= rcMVMatrix rc
+            uniform (UniformLocation 4) $= rcPMatrix rc
+            uniform (UniformLocation 7) $= rcLightPos rc
+            uniform (UniformLocation 8) $= (Index1 $ rcTime rc)
+            uniform (UniformLocation 9) $= rcNormalMatrix rc
+            uniform (UniformLocation 10) $= rcGlobalAmbient rc
+
+buildWaterObject :: BuilderM GLfloat a -> IO (ResourcesClosure -> IO ())
+buildWaterObject builder = do
     waterProg <- loadProgramFullSafe' 
          (Just ("shaders/water.tcs","shaders/water.tes"))
          (Nothing::Maybe String) "shaders/water.vert" "shaders/water.frag"
@@ -326,6 +304,44 @@ makeResources surf builder forestB jungleB water = do
     location <- get (uniformLocation waterProg "texture")
     skyLocation <- get (uniformLocation waterProg "skytex") 
     skyNightLocation <- get (uniformLocation waterProg "skynight")
+    obj <- (liftM (setPrimitiveMode Ex.Patches) $ newDefaultGlyphObjectWithClosure builder () $ \_ -> do
+                currentProgram $= Just waterProg
+                setupTexturing waterTexture location 0
+                setupTexturing skyTexture skyLocation 1
+                setupTexturing skyNightTexture skyNightLocation 2
+            )
+    return $ \rc -> do
+        draw $ prepare obj $ \_ -> do
+            cullFace $= Nothing
+            patchVertices SV.$= 4
+            uniform (UniformLocation 4) $= rcPMatrix rc 
+            uniform (UniformLocation 5) $= rcMVMatrix rc
+            uniform (UniformLocation 7) $= rcNormalMatrix rc
+            uniform (UniformLocation 8) $= rcLightPos rc
+            uniform (UniformLocation 9) $= Index1 (rcTime rc / 20.0)
+            uniform (UniformLocation 10) $= rcGlobalAmbient rc
+    
+
+makeResources :: SDL.Surface -> BuilderM GLfloat b ->
+    Seq.Seq GLfloat -> Seq.Seq GLfloat ->
+    BuilderM GLfloat a -> IO Resources
+makeResources surf builder forestB jungleB water = do
+    let pMatrix' = perspectiveMatrix 50 1.8 0.1 100
+
+    let l_routines = sequence [
+            skyboxObject,
+            (return $ \_ -> do
+                vertexProgramPointSize $= Enabled
+                depthFunc $= Just Less),
+            buildTerrainObject builder,
+            (return $ \_-> do
+                blend $= Enabled
+                cullFace $= Just Back
+                blendFunc $= (GL.SrcAlpha,OneMinusSrcAlpha)),
+            buildForestObject forestB "tree.obj" "textures/wood_low.png",
+            buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png",
+            buildWaterObject water
+         ]
     Resources 
         <$> pure surf
         <*> do CameraPosition
@@ -338,19 +354,10 @@ makeResources surf builder forestB jungleB water = do
                 <*> pure 0
         <*> pure pMatrix'
         <*> pure pMatrix'
-        <*> buildTerrainObject builder
-        <*> buildForestObject forestB "tree.obj" "textures/wood_low.png"
-        <*> buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png"
-        <*> (liftM (setPrimitiveMode Ex.Patches) $ newDefaultGlyphObjectWithClosure water () $ \_ -> do
-                currentProgram $= Just waterProg
-                setupTexturing waterTexture location 0
-                setupTexturing skyTexture skyLocation 1
-                setupTexturing skyNightTexture skyNightLocation 2
-                )
+        <*> l_routines
         <*> pure 0
         <*> pure 1
         <*> pure 0
-        <*> skyboxObject
 
 printErrors :: String -> IO ()
 printErrors ctx =
@@ -394,7 +401,7 @@ skyboxTop dist = do
                  (bTexture2(0,1),   bVertex3 (  dist, dist, -dist)),
                  (bTexture2(0,0),   bVertex3 ( -dist, dist, -dist))]
 
-skyboxObject :: IO (GlyphObject (UniformLocation,UniformLocation))
+skyboxObject :: IO (ResourcesClosure -> IO ())
 skyboxObject = do
     prog <- loadProgramSafe' "shaders/sky.vert" "shaders/sky.frag" (Nothing::Maybe String)
     texLoc <- get $ uniformLocation prog "texture"
@@ -425,8 +432,17 @@ skyboxObject = do
         setupTexturing texture2 texLocNight 1
         printErrors "Skybox"
 
-    (return . teardown obj) $ \_ -> do
+    let obj' = teardown obj $ \_ -> do
         draw topObj
+    return $ \rc -> do
+        depthFunc $= Nothing
+        cullFace $= Nothing
+        draw $ prepare obj' $ \this -> do
+            let (matLoc,pmatLoc) = getResources this
+            let (CameraPosition _ th ph) = rcCameraPos rc
+            uniform pmatLoc $= rcPMatrix rc
+            uniform matLoc $= buildMVMatrix (CameraPosition (Vec3 (0,0,0)) th ph)
+            uniform (UniformLocation 1) $= rcGlobalAmbient rc
                 
     
 
