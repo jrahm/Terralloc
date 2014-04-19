@@ -61,18 +61,11 @@ data Resources = Resources {
     pMatrix :: Mat4 GLfloat,
     mvMatrix :: Mat4 GLfloat,
 
-<<<<<<< HEAD
     routines :: [ResourcesClosure -> IO ()],
     -- object :: GlyphObject (),
     -- forest :: GlyphObject (),
     -- jungle :: GlyphObject (),
     -- waterObj  :: GlyphObject (),
-=======
-    object :: GlyphObject (),
-    forest :: Maybe (GlyphObject ()),
-    jungle :: Maybe (GlyphObject ()),
-    waterObj  :: GlyphObject (),
->>>>>>> a2224be33baae7ae07473e74fe94414cdb8f41d2
 
     speed :: Int,
     timeSpeed :: Int,
@@ -140,17 +133,11 @@ eventHandle event res = do
         KeyUp (Keysym SDLK_s _ _) ->
             return $ setSpeed (speed res + 1) res
 
-        KeyUp (Keysym SDLK_g _ _) -> do
-            SDL.showCursor False
-            SDL.grabInput True
-            return res
         KeyUp (Keysym SDLK_f _ _) -> do
             ret <- reshape 1920 1080 res
             SDL.toggleFullscreen $ rSurface ret
             SDL.showCursor False
-            SDL.grabInput True
             return ret
-
         _ -> return res
 
 displayHandle :: Resources -> IO Resources
@@ -168,7 +155,6 @@ displayHandle resources = do
     let l_mvMatrix = buildMVMatrix $ cameraPos
     let normalMatrix = glslModelViewToNormalMatrix l_mvMatrix
 
-<<<<<<< HEAD
     clearColor $= Color4 0 0 0 0
     clear [ColorBuffer, DepthBuffer]
     SDL.flip $ rSurface resources
@@ -183,53 +169,6 @@ displayHandle resources = do
                 (Vec4 globalAmbient)
                 cameraPos
                 in mapM_ (Prelude.$rc) $ routines resources
-=======
-    cullFace $= Just Front
-    draw $ prepare (object resources) $ \_ -> do
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 6) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 7) $= normalMatrix
-        uniform (UniformLocation 8) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
-
-    blend $= Enabled
-    cullFace $= Just Back
-    blendFunc $= (GL.SrcAlpha,OneMinusSrcAlpha)
-
-    when (isJust $ forest resources) $
-        draw $ prepare (fromJust $ forest resources) $ \_ -> do
-            uniform (UniformLocation 5) $= l_mvMatrix
-            uniform (UniformLocation 4) $= pMatrix resources
-            uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
-            uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
-            uniform (UniformLocation 9) $= normalMatrix
-    
-            uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-            return ()
-
-    when (isJust $ jungle resources) $ do
-        draw $ prepare (fromJust $ jungle resources) $ \_ -> do
-            uniform (UniformLocation 5) $= l_mvMatrix
-            uniform (UniformLocation 4) $= pMatrix resources
-            uniform (UniformLocation 7) $= l_mvMatrix `glslMatMul` lightPos
-            uniform (UniformLocation 8) $= Index1 (fromIntegral $ time resources::GLfloat)
-            uniform (UniformLocation 9) $= normalMatrix
-    
-            uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-            return ()
-
-    cullFace $= Nothing
-    draw $ prepare (waterObj resources) $ \_ -> do
-        patchVertices SV.$= 4
-        uniform (UniformLocation 4) $= pMatrix resources
-        uniform (UniformLocation 5) $= l_mvMatrix
-        uniform (UniformLocation 7) $= normalMatrix
-        uniform (UniformLocation 8) $= l_mvMatrix `glslMatMul` lightPos
-        uniform (UniformLocation 9) $= Index1 ((fromIntegral $ time resources) / 20::GLfloat)
-        uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
-        return ()
->>>>>>> a2224be33baae7ae07473e74fe94414cdb8f41d2
 
     SDL.glSwapBuffers
     return resources
@@ -292,7 +231,6 @@ buildTerrainObject builder = do
                     uniform dXlocation $= Index1 (dx::GLfloat)
                     uniform dYlocation $= Index1 (dy::GLfloat)
                     printErrors "terrainObjectClosure"
-<<<<<<< HEAD
     return $ \rc -> do
         draw $ prepare obj $ \_ -> do
             cullFace $= Just Front
@@ -305,13 +243,6 @@ buildTerrainObject builder = do
 buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (ResourcesClosure -> IO ())
 buildForestObject seq obj tex =
     if Seq.null seq then return ((const.return) ()) else do
-=======
-
-buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (Maybe (GlyphObject ()))
-buildForestObject seq obj tex =
-    if Seq.null seq then return Nothing else liftM Just $
-    do
->>>>>>> a2224be33baae7ae07473e74fe94414cdb8f41d2
     let bufferIO :: IO BufferObject
         bufferIO = (newArray . Fold.toList) seq >>= ptrToBuffer ArrayBuffer (Seq.length seq * 4)
     
