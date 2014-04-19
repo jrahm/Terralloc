@@ -1,0 +1,69 @@
+#version 430
+ 
+// triangles, quads, or isolines
+layout (quads, fractional_odd_spacing, ccw) in;
+in vec3 evaluationpoint[];
+ 
+// could use a displacement map here
+ 
+uniform mat4 viewmat;
+uniform mat4 projmat;
+ 
+// gl_TessCoord is location within the patch
+// (barycentric for triangles, UV for quads)
+//
+layout(location = 4) uniform mat4 pjMatrix ;
+layout(location = 5) uniform mat4 mvMatrix ;
+layout(location = 7) uniform mat3 normalMatrix ;
+layout(location = 9) uniform float time ;
+
+out vec3 normal ;
+out vec4 position ;
+out vec2 texpos ;
+
+out vec3 original_x ;
+out vec3 original_z ;
+
+vec2 skew( float t ) {
+    return vec2(0.8*sin(t-time)+t,sin(t-time) / 5) ;
+}
+
+vec2 dskew( float t ) {
+    return vec2(0.8*(cos( time - t )+ 1), cos(time - t) / 5) ;
+}
+
+vec2 xripple( float t ) {
+    return vec2(t,sin(t-time)/5.0) ;
+}
+
+vec2 dxripple( float t ) {
+    return vec2(1,-cos(time-t)/5.0) ;
+}
+ 
+void main () {
+    float u = gl_TessCoord.x;
+    float v = gl_TessCoord.y;
+    
+    vec3 a = mix(evaluationpoint[1], evaluationpoint[0], u);
+    vec3 b = mix(evaluationpoint[2], evaluationpoint[3], u);
+    vec3 pos = mix(a, b, v);
+  
+  // Bolt down the two edges to ensure the end of the
+  // polygon does not show itself
+  if( u != 0 && u != 1 ) {
+    vec2 sk = skew(pos.z) ;
+    vec2 dsk = dskew(pos.z) ;
+    vec2 xr = xripple(pos.x) ;
+    vec2 dxr = dxripple(pos.x) ;
+    pos = vec3( xr.x, pos.y + sk.y + xr.y, sk.x);
+    vec3 normal_ = vec3(dxr.x, dsk.y+dxr.y, dsk.x) ;
+    normal = - normalMatrix * normal_;  // cross( p0 - p1, p0 - p2 );
+  } else {
+    normal = - normalMatrix * vec3(0,1,0) ;
+  }
+  texpos = pos.xz / 20.0 ;
+  gl_Position = pjMatrix * (position = mvMatrix * vec4(pos, 1.0));
+
+  original_x = normalize(- normalMatrix * vec3(1,0,0)) ;
+  original_z = normalize(- normalMatrix * vec3(0,0,1)) ;
+}

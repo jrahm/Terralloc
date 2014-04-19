@@ -9,6 +9,7 @@ layout(location = 10) uniform vec4 globalAmbient ;
 
  uniform sampler2D texture ;
  uniform sampler2D skytex ;
+ uniform sampler2D skynight ;
 
 in vec3 normal ;
 in vec4 position ;
@@ -50,15 +51,20 @@ void main() {
     vec3 camVector = vec3(position) - vec3(0,0,0);
     vec3 ref = reflect( normalize(camVector), newNorm ) ;
 
-    float tex_x = (dot( ref, original_x ) + 1) / 2;
-    float tex_y = (dot( ref, original_z ) + 1) / 2;
-    vec4 refcolor = texture2D(skytex, vec2(tex_x,tex_y));
+    float tex_x = (abs(dot( ref, original_x )) + 1) / 2;
+    float tex_y = (abs(dot( ref, original_z )) + 1) / 2;
+    // vec4 refcolor = texture2D(skytex, vec2(tex_x,tex_y));
+    vec2 tmpcoord = vec2(tex_x,tex_y) ;
+    vec4 refcolor = 
+        mix(texture2D(skynight,tmpcoord) * (1-globalAmbient.a),
+            texture2D(skytex,tmpcoord) * vec4(normalize(globalAmbient.xyz),1),
+            (globalAmbient.a + 1) / 2) ;
     float coef = dot( normalize(vec3(lightPos) - vec3(position)), normalize(normal) ) * 0.5 + 0.5 ;
 
 
-    frag_color = vec4( 0,0,1, 1.0 );
+ //   frag_color = vec4( 0,0,1, 1.0 );
     // frag_color = vec4(tex_x,tex_y,0,1.0) ;
     // vec4 color = sample(0,0);
-   // frag_color = vec4(vec3(refcolor * coef) * vec3(0.6,0.8,1.0),0.8) * vec4(normalize(globalAmbient.xyz),1.0);
+    frag_color = vec4(vec3(refcolor) * vec3(0.6,0.8,1.0),0.95) * vec4(normalize(globalAmbient.xyz),1.0);
 //    frag_color = vec4(0,0,1,0.8) ;
 }

@@ -2,6 +2,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
+
 module Main where
 
 import Graphics.Rendering.OpenGL as GL
@@ -31,7 +32,8 @@ import Resources
 import System.Random
 import Debug.Trace
 
-
+import System.Environment
+import System.Exit
 
 data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
                 Tundra | Unknown deriving (Enum,Eq)
@@ -129,7 +131,7 @@ getWaterQuads marr arr = do
             mxy = fromIntegral maxy + 1
             mny = fromIntegral miny - 1
             relev = fromIntegral elev / 10 in
-            mapM_ bVertex3 $ trianglesFromQuads
+            mapM_ bVertex3
                 [(mxx,relev,mxy),
                  (mxx,relev,mny),
                  (mnx,relev,mny),
@@ -258,9 +260,16 @@ createLocations arr gen density typ = do
 
 main :: IO ()
 main = do
+    let doload str = sequence
+         [ SDLImg.load $ "maps/"++str++"_terrain.png",
+           SDLImg.load $ "maps/"++str++"_height.png" ]
+    args <- getArgs
     putStrLn "Loading..."
-    terrain <- SDLImg.load "terrain.png"
-    height <- SDLImg.load "height.png"
+    [terrain,height] <- 
+        case args of 
+            (ter:hei:_) -> sequence [SDLImg.load ter, SDLImg.load hei]
+            (m:_) -> doload m
+            _ -> sequence [SDLImg.load "maps/wonderland_terrain.png", SDLImg.load "maps/wonderland_height.png"]
     putStrLn "Done Loading ..."
 
     arr <- buildArray terrain height

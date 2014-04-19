@@ -42,6 +42,8 @@ import System.FilePath
 import Models
 import Debug.Trace
 
+import qualified Data.StateVar as SV
+
 data CameraPosition = CameraPosition {
     pEye :: Vec3 GLfloat,
     pTh :: GLfloat,
@@ -194,8 +196,9 @@ displayHandle resources = do
         uniform (UniformLocation 10) $= Vec4 (r,g,b,a::GLfloat)
         return ()
 
+    cullFace $= Nothing
     draw $ prepare (waterObj resources) $ \_ -> do
-        patchVertices $= 3
+        patchVertices SV.$= 4
         uniform (UniformLocation 4) $= pMatrix resources
         uniform (UniformLocation 5) $= l_mvMatrix
         uniform (UniformLocation 7) $= normalMatrix
@@ -298,7 +301,7 @@ buildForestObject seq obj tex = do
                                     nelem Float (fromIntegral $ (3+3+2+1)*sizeOf (0::GLfloat))
                                     (wordPtrToPtr offset))
                             vertexAttribArray location $= Enabled
-                            vertexAttributeDivisor location $= 1
+                            vertexAttributeDivisor location SV.$= 1
 
                 declareAttr (AttribLocation 10) 3 0
                 declareAttr (AttribLocation 11) 3 (3*4)
@@ -319,8 +322,10 @@ makeResources surf builder forestB jungleB water = do
          (Nothing::Maybe String) "shaders/water.vert" "shaders/water.frag"
     waterTexture <- load "textures/water.jpg" >>= textureFromSurface
     skyTexture <- load "textures/skybox_top.png" >>= textureFromSurface
+    skyNightTexture <- load "textures/skybox_top_night.png" >>= textureFromSurface
     location <- get (uniformLocation waterProg "texture")
     skyLocation <- get (uniformLocation waterProg "skytex") 
+    skyNightLocation <- get (uniformLocation waterProg "skynight")
     Resources 
         <$> pure surf
         <*> do CameraPosition
@@ -340,6 +345,7 @@ makeResources surf builder forestB jungleB water = do
                 currentProgram $= Just waterProg
                 setupTexturing waterTexture location 0
                 setupTexturing skyTexture skyLocation 1
+                setupTexturing skyNightTexture skyNightLocation 2
                 )
         <*> pure 0
         <*> pure 1
