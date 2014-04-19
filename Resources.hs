@@ -253,7 +253,7 @@ buildTerrainObject builder = do
            "tundra.png" ]
     print terrainList
     terrainProg <- loadProgramSafe' "shaders/basic.vert" "shaders/basic.frag" (Nothing::Maybe String)
-    lst <- forM (zip [0..7::Int] $ terrainList ++ repeat "height.png") $ \(idx,str) -> do
+    lst <- forM (zip [0..7::Int] $ terrainList ++ repeat "terrain/unknown.png") $ \(idx,str) -> do
             location <- get $ uniformLocation terrainProg $ "textures[" ++! idx ++ "]"
             load str >>= textureFromSurface >>= return . (,) location
 
