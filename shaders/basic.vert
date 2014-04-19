@@ -16,6 +16,7 @@ out vec4 position ;
 out vec3 normal ;
 
 out float texture_blend[8] ;
+flat out int texidx ;
 
 void main() {
     gl_Position = pjMatrix * (position = mvMatrix * vec4(in_position,1.0)) ;
@@ -23,5 +24,6 @@ void main() {
     normal = normalMatrix * in_normal ;
     for ( int i = 0 ; i < 8 ; ++ i ) 
         texture_blend[i] = 0 ;
-    texture_blend[int(clamp(round(in_color.a),0,8))] = 1.0 ;
+    texidx = int(clamp(round(in_color.a),0,8));
+    texture_blend[texidx] = 1.0 ;
 }

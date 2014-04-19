@@ -20,6 +20,8 @@ in float texture_blend[8] ;
 in vec2 texcoord ;
 in vec4 position ;
 
+flat in int texidx ;
+
 vec3 sample(float xc,float yc) {
     vec3 color = vec3(0);
     for ( int i = 0 ; i < 8 ; ++ i ) {
@@ -49,7 +51,7 @@ int dominentTexture() {
 }
 
 vec3 calNormChange( vec3 norm, vec3 down, vec3 right ) {
-    int dom = dominentTexture() ;
+    int dom = texidx ;
     float x00 = length(sample2(dom,-dX, dY)); 
     float x01 = length(sample2(dom,  0, dY)); 
     float x02 = length(sample2(dom, dX, dY)); 
