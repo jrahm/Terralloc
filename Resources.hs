@@ -142,7 +142,12 @@ eventHandle event res = do
             ret <- reshape 1920 1080 res
             SDL.toggleFullscreen $ rSurface ret
             SDL.showCursor False
+            SDL.grabInput True
             return ret
+        KeyUp (Keysym SDLK_g _ _) -> do
+            SDL.showCursor False
+            SDL.grabInput True
+            return res
         _ -> return res
 
 displayHandle :: Resources -> IO Resources
