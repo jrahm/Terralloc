@@ -6,10 +6,12 @@ layout(location = 0) out vec4 frag_color ;
 layout(location = 8) uniform vec4 lightPos ;
 layout(location = 9) uniform float time ;
 layout(location = 10) uniform vec4 globalAmbient ;
+layout(location = 5) uniform mat4 mvMatrix ;
 
- uniform sampler2D texture ;
- uniform sampler2D skytex ;
- uniform sampler2D skynight ;
+uniform sampler2D texture ;
+uniform sampler2D skytex ;
+uniform sampler2D skynight ;
+uniform vec4 lightpos ;
 
 in vec3 normal ;
 in vec4 position ;
@@ -42,6 +44,16 @@ vec3 calNormChange( vec3 norm, vec3 down, vec3 right ) {
 
 in vec3 original_x ;
 in vec3 original_z ;
+in vec3 tmpnormal ;
+
+vec4 specular( vec3 a_normal ) {
+    vec3 difpos = -normalize(vec3(0,0,0) - vec3(position)) ;
+    difpos = reflect( difpos, a_normal ) ;
+    vec3 lightpos2 = reflect( reflect( vec3(lightPos), original_x ), original_z );
+    vec3 diflight = normalize(vec3(lightpos2) - vec3(position)) ;
+    float d = pow(max(dot( normalize(difpos), -normalize(diflight) ), 0.0 ),100.0);
+    return vec4(vec3(d),1) ;
+}
 void main() {
     vec3 down = vec3( 0, -1, 0 ) ;
     vec3 right = normalize(cross( normal, down )) ;
@@ -59,6 +71,8 @@ void main() {
         mix(texture2D(skynight,tmpcoord) * (1-globalAmbient.a),
             texture2D(skytex,tmpcoord) * vec4(normalize(globalAmbient.xyz),1),
             (globalAmbient.a + 1) / 2) ;
+    vec3 nlightpos = reflect( vec3(lightPos), vec3(mvMatrix * vec4(0,1,0,1)) ) ;
+    refcolor += specular( newNorm ) ;
     float coef = dot( normalize(vec3(lightPos) - vec3(position)), normalize(normal) ) * 0.5 + 0.5 ;
 
 

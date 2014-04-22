@@ -28,6 +28,8 @@ import Control.Monad
 import Data.Angle
 import Data.Function
 import Data.Setters
+import Data.Word
+import qualified Data.Array.Storable as SA
 import qualified Data.Sequence as Seq
 import Data.Sequence ((><),(|>),(<|))
 import qualified Data.Foldable as Fold
@@ -35,9 +37,11 @@ import Data.Maybe
 import Debug.Trace
 
 import Foreign.Marshal.Array
+import Foreign.Marshal.Alloc
 
 import System.Exit
 import System.FilePath
+import System.Random
 
 import Models
 import Debug.Trace
@@ -80,6 +84,7 @@ data ResourcesClosure = ResourcesClosure {
     , rcNormalMatrix  :: Mat3 GLfloat
     , rcGlobalAmbient :: Vec4 GLfloat
     , rcCameraPos :: CameraPosition
+    , rcCameraLocation :: Vec3 GLfloat
 }
 
 $(declareSetters ''Resources)
@@ -142,7 +147,7 @@ eventHandle event res = do
 
 displayHandle :: Resources -> IO Resources
 displayHandle resources = do
-    let cameraPos@(CameraPosition _ th ph) = rPosition resources
+    let cameraPos@(CameraPosition r th ph) = rPosition resources
     let lighty = ((/10) . fromIntegral . time) resources
     let logist c =  (1 / (1 + 2.71828**(-c*x))) * 0.9 + 0.1
             where x = sine $ Degrees (lighty)
@@ -168,6 +173,7 @@ displayHandle resources = do
                 (normalMatrix)
                 (Vec4 globalAmbient)
                 cameraPos
+                (Vec3 $ toEuclidian (r,th,ph))
                 in mapM_ (Prelude.$rc) $ routines resources
 
     SDL.glSwapBuffers
@@ -240,6 +246,40 @@ buildTerrainObject builder = do
             uniform (UniformLocation 7) $= rcNormalMatrix rc
             uniform (UniformLocation 8) $= rcGlobalAmbient rc
 
+cloudProgram :: IO (ResourcesClosure -> IO ())
+cloudProgram = do
+    let randarray ptr n stgen =
+            if n == 0 then return () else do
+                let (tmp,stgen') = next stgen
+                putStrLn $ "TMP: " ++! (tmp `mod` 256)
+                poke ptr (fromIntegral $ tmp `mod` 256)
+                randarray (advancePtr ptr 1) (n - 1) stgen'
+    let builder =
+            forM_ simpleCube $ \(x,y,z) -> do
+                bColor4 (x,y,z,0)
+                bVertex3 (x,y+20,z)
+    program <- loadProgramSafe' "shaders/clouds.vert" "shaders/clouds.frag" noShader
+
+    stgen <- newStdGen
+    array3D <- SA.newListArray ((0,0,0,0),(3,64,64,64)) (map (fromIntegral . (`mod`256)) $ (randoms stgen::[Int]))
+
+    SA.withStorableArray array3D $ \ptr3D -> do
+        density <- makeTexture3D >>= textureFromPointer3D ptr3D (64,64,64)
+
+        obj' <- newDefaultGlyphObjectWithClosure builder () $ \_ -> do
+                    currentProgram $= Just program
+        [mvMatU, pMatU, densityU, globalAmbientU,lightposU] <- mapM (get . uniformLocation program)
+            ["mvMatrix","pMatrix","density","globalAmbient","lightpos"]
+        return $ \rc -> do
+            draw $ prepare obj' $ \_ -> do
+                cullFace $= Nothing
+                uniform mvMatU $= rcMVMatrix rc
+                uniform pMatU $= rcPMatrix rc
+                uniform globalAmbientU $= rcGlobalAmbient rc
+                uniform lightposU $= rcLightPos rc
+                setupTexturing3D density densityU 0
+            
+
 buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (ResourcesClosure -> IO ())
 buildForestObject seq obj tex =
     if Seq.null seq then return ((const.return) ()) else do
@@ -252,7 +292,7 @@ buildForestObject seq obj tex =
     let !treeF = trace "build tree" $ (basicBuildObject file :: BuilderM GLfloat ())
 
     forestProg <- loadProgramSafe' 
-        "shaders/forest.vert" "shaders/forest.frag" (Nothing::Maybe String)
+        "shaders/forest.vert" "shaders/forest.frag" noShader
 
     woodTexture <- load tex >>= textureFromSurface
     let (dx,dy) = (mapT2 $ (1/).fromIntegral) (textureSize woodTexture)
@@ -297,7 +337,7 @@ buildWaterObject :: BuilderM GLfloat a -> IO (ResourcesClosure -> IO ())
 buildWaterObject builder = do
     waterProg <- loadProgramFullSafe' 
          (Just ("shaders/water.tcs","shaders/water.tes"))
-         (Nothing::Maybe String) "shaders/water.vert" "shaders/water.frag"
+         noShader "shaders/water.vert" "shaders/water.frag"
     waterTexture <- load "textures/water.jpg" >>= textureFromSurface
     skyTexture <- load "textures/skybox_top.png" >>= textureFromSurface
     skyNightTexture <- load "textures/skybox_top_night.png" >>= textureFromSurface
@@ -341,6 +381,7 @@ makeResources surf builder forestB jungleB water = do
             buildForestObject forestB "tree.obj" "textures/wood_low.png",
             buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png",
             buildWaterObject water
+            -- cloudProgram
          ]
     Resources 
         <$> pure surf
@@ -422,6 +463,8 @@ skyboxObject = do
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_T $ fromIntegral gl_CLAMP_TO_EDGE
     textureTopNight <- load "textures/skybox_top_night.png" >>= textureFromSurface
 
+    [lightposU] <- mapM (get . uniformLocation prog) 
+                    ["lightpos"]
     topObj <- newDefaultGlyphObjectWithClosure (skyboxTop 1) () $ \_ -> do
         setupTexturing textureTop texLoc 2
         setupTexturing textureTopNight texLocNight 3
@@ -440,6 +483,7 @@ skyboxObject = do
         draw $ prepare obj' $ \this -> do
             let (matLoc,pmatLoc) = getResources this
             let (CameraPosition _ th ph) = rcCameraPos rc
+            uniform lightposU $= rcLightPos rc
             uniform pmatLoc $= rcPMatrix rc
             uniform matLoc $= buildMVMatrix (CameraPosition (Vec3 (0,0,0)) th ph)
             uniform (UniformLocation 1) $= rcGlobalAmbient rc

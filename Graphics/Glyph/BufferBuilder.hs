@@ -35,6 +35,39 @@ nelem (Plot _ _ _ l) = l
 sizeofGLfloat :: Int
 sizeofGLfloat = 4
 
+simpleCube :: Num a => [(a,a,a)]
+simpleCube = trianglesFromQuads [
+      (-1, 1,-1)
+    , ( 1, 1,-1)
+    , ( 1,-1,-1)
+    , (-1,-1,-1)
+
+    , (-1, 1, 1)
+    , ( 1, 1, 1)
+    , ( 1,-1, 1)
+    , (-1,-1, 1)
+
+    , (-1, 1, 1)
+    , ( 1, 1, 1)
+    , ( 1, 1,-1)
+    , (-1, 1,-1)
+
+    , (-1,-1, 1)
+    , ( 1,-1, 1)
+    , ( 1,-1,-1)
+    , (-1,-1,-1)
+
+    , (-1,-1, 1)
+    , (-1, 1, 1)
+    , (-1, 1,-1)
+    , (-1,-1,-1)
+
+    , ( 1,-1, 1)
+    , ( 1, 1, 1)
+    , ( 1, 1,-1)
+    , ( 1,-1,-1)
+    ]
+
 class Monad a => IsModelBuilder b a where
     plotVertex3 :: b -> b -> b -> a ()
     plotNormal  :: b -> b -> b -> a ()
