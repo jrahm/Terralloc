@@ -23,13 +23,14 @@ out vec2 texpos ;
 
 out vec3 original_x ;
 out vec3 original_z ;
+out vec3 tmpnormal ;
 
 vec2 skew( float t ) {
     return vec2(0.8*sin(t-time)+t,sin(t-time) / 5) ;
 }
 
 vec2 dskew( float t ) {
-    return vec2(0.8*(cos( time - t )+ 1), cos(time - t) / 5) ;
+    return vec2(-cos(time-t),5*(0.8*cos(time-t)+1)) ;
 }
 
 vec2 xripple( float t ) {
@@ -37,7 +38,7 @@ vec2 xripple( float t ) {
 }
 
 vec2 dxripple( float t ) {
-    return vec2(1,-cos(time-t)/5.0) ;
+    return vec2(cos(time-t)/5.0,-1);
 }
  
 void main () {
@@ -56,10 +57,12 @@ void main () {
     vec2 xr = xripple(pos.x) ;
     vec2 dxr = dxripple(pos.x) ;
     pos = vec3( xr.x, pos.y + sk.y + xr.y, sk.x);
-    vec3 normal_ = vec3(dxr.x, dsk.y+dxr.y, dsk.x) ;
+    vec3 normal_ = vec3(dxr.x, (dsk.y+dxr.y)/2, dsk.x) ;
     normal = - normalMatrix * normal_;  // cross( p0 - p1, p0 - p2 );
+    tmpnormal = normalize(normal_) ;
   } else {
     normal = - normalMatrix * vec3(0,1,0) ;
+    tmpnormal = vec3(0,1,0);
   }
   texpos = pos.xz / 20.0 ;
   gl_Position = pjMatrix * (position = mvMatrix * vec4(pos, 1.0));

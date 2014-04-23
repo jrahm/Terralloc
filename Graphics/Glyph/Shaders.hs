@@ -27,6 +27,9 @@ instance IsShaderSource BSL.ByteString where
     loadShader typ = loadShader typ . toStrict
         where toStrict = BS.concat . BSL.toChunks
 
+noShader :: Maybe String
+noShader = Nothing
+
 loadShaderBS :: String -> ShaderType -> BS.ByteString -> IO (String, Maybe Shader)
 loadShaderBS ctx typ src = do
     shader <- createShader typ

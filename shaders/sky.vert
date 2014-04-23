@@ -11,8 +11,9 @@ uniform mat4 mvMatrix ;
 uniform mat4 pjMatrix ;
 
 out vec2 texcoord ;
+out vec4 position ;
 
 void main() {
-    gl_Position = pjMatrix * mvMatrix * vec4(in_position,1.0);
+    gl_Position = pjMatrix * (position = mvMatrix * vec4(in_position,1.0));
     texcoord = in_texcoord ;
 }

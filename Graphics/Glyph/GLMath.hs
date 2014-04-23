@@ -92,6 +92,12 @@ module Graphics.Glyph.GLMath where
                        sz, uz, -fz, 0,
                        -(s<.>e) , -(u'<.>e),  (f<.>e),  1 )
 
+    orthoMatrix :: GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> Mat4 GLfloat
+    orthoMatrix top bot right left near far =
+        Matrix4 (2 / (right-left), 0, 0, - (right + left) / (right - left),
+                 0, 2 / (top-bot), 0, - (top+bot) / (top-bot),
+                 0, 0, -2 / (far-near), - (far+near) / (far - near),
+                 0, 0, 0, 1)
     perspectiveMatrix :: GLfloat -> GLfloat -> GLfloat -> GLfloat -> Mat4 GLfloat
     {- as close to copied from glm as possible -}
     perspectiveMatrix fov asp zn zf =

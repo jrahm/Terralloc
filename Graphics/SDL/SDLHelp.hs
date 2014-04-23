@@ -21,6 +21,11 @@ data TextureData = TextureData {
     textureSize :: (Int,Int),
     textureObject :: TextureObject } deriving Show
 
+data TextureData3D = TextureData3D {
+    textureSize3D :: (Int,Int,Int),
+    textureObject3D :: TextureObject } deriving Show
+
+
 bindSurfaceToTexture :: SDL.Surface -> TextureObject -> IO TextureData
 bindSurfaceToTexture surf to = do
     textureBinding Texture2D $= Just to
@@ -35,8 +40,22 @@ bindSurfaceToTexture surf to = do
           h :: (Integral a) => SDL.Surface -> a
           h = fromIntegral . surfaceGetHeight
 
+textureFromPointer3D :: Ptr Word8 -> (Int,Int,Int) -> TextureObject -> IO TextureData3D
+textureFromPointer3D ptr (w,h,d) to = do
+        textureBinding Texture3D $= Just to
+        glTexImage3D gl_TEXTURE_3D 0 3 (f w) (f h) (f d) 0 gl_RGB gl_UNSIGNED_BYTE ptr
+        return $ TextureData3D (w,h,d) to
+    where f = fromIntegral
+
 textureFromSurface :: SDL.Surface -> IO TextureData
 textureFromSurface surf = makeTexture >>= (bindSurfaceToTexture surf >=> return)
+
+makeTexture3D :: IO TextureObject
+makeTexture3D = do
+    texobj <- liftM head $ genObjectNames 1
+    textureBinding Texture3D $= Just texobj
+    textureFilter Texture3D $= ((Linear', Nothing), Linear')
+    return texobj
 
 makeTexture :: IO TextureObject
 makeTexture = do
@@ -123,4 +142,11 @@ setupTexturing (TextureData _ to) tu unit = do
     texture Texture2D $= Enabled
     activeTexture $= TextureUnit (fromIntegral unit)
     textureBinding Texture2D $= Just to
+    uniform tu $= Index1 (fromIntegral unit::GLint)
+
+setupTexturing3D :: TextureData3D -> UniformLocation -> Int -> IO ()
+setupTexturing3D (TextureData3D _ to) tu unit = do
+    texture Texture3D $= Enabled
+    activeTexture $= TextureUnit (fromIntegral unit)
+    textureBinding Texture3D $= Just to
     uniform tu $= Index1 (fromIntegral unit::GLint)
