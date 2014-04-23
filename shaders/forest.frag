@@ -6,9 +6,9 @@ layout(location = 0) out vec4 frag_color ;
 
 uniform mat4 mvMatrix ;
 uniform mat4 pjMatrix ;
-layout(location = 6) uniform sampler2D texture ;
-layout(location = 7) uniform vec4 light ;
-layout(location = 10) uniform vec4 globalAmbient ;
+uniform sampler2D texture ;
+uniform vec4 light ;
+uniform vec4 globalAmbient ;
 
 uniform float dX ;
 uniform float dY ;

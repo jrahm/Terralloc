@@ -7,9 +7,9 @@ layout(location = 2) in vec4 in_color ;
 layout(location = 1) in vec3 in_normal ;
 layout(location = 3) in vec2 in_texcoord ;
 
-layout(location = 4) uniform mat4 pjMatrix ;
-layout(location = 5) uniform mat4 mvMatrix ;
-layout(location = 7) uniform mat3 normalMatrix ;
+uniform mat4 pjMatrix ;
+uniform mat4 mvMatrix ;
+uniform mat3 normalMatrix ;
 
 out vec2 texcoord ;
 out vec4 position ;

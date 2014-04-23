@@ -84,6 +84,16 @@ data ResourcesClosure = ResourcesClosure {
 
 $(declareSetters ''Resources)
 
+getUniformsSafe :: Program -> [String] -> IO [UniformLocation]
+getUniformsSafe prog uniforms =
+    forM uniforms $ \uniform -> do
+        tmp <- get $ uniformLocation prog uniform
+        case tmp of
+            UniformLocation (-1) -> do
+                putStrLn $ "No uniform with name: "++uniform
+                exitWith (ExitFailure 112)
+            _ ->  return tmp
+
 buildMVMatrix :: CameraPosition -> Mat4 GLfloat
 buildMVMatrix (CameraPosition eye th ph) =
     let up = if ph' >= 90 && ph' < 270 then Vec3 (0,-1,0) else Vec3 (0,1,0)
@@ -231,14 +241,17 @@ buildTerrainObject builder = do
                     uniform dXlocation $= Index1 (dx::GLfloat)
                     uniform dYlocation $= Index1 (dy::GLfloat)
                     printErrors "terrainObjectClosure"
+
+    [lightposU, globalAmbientU, pjMatrixU, mvMatrixU, normalMatrixU]
+        <- getUniformsSafe terrainProg ["lightPos","globalAmbient","pjMatrix","mvMatrix","normalMatrix"]
     return $ \rc -> do
         draw $ prepare obj $ \_ -> do
             cullFace $= Just Front
-            uniform (UniformLocation 5) $= rcMVMatrix rc
-            uniform (UniformLocation 4) $= rcPMatrix rc
-            uniform (UniformLocation 6) $= rcLightPos rc
-            uniform (UniformLocation 7) $= rcNormalMatrix rc
-            uniform (UniformLocation 8) $= rcGlobalAmbient rc
+            uniform mvMatrixU $= rcMVMatrix rc
+            uniform pjMatrixU $= rcPMatrix rc
+            uniform lightposU $= rcLightPos rc
+            uniform normalMatrixU $= rcNormalMatrix rc
+            uniform globalAmbientU $= rcGlobalAmbient rc
 
 buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (ResourcesClosure -> IO ())
 buildForestObject seq obj tex =
@@ -259,9 +272,12 @@ buildForestObject seq obj tex =
     dXlocation <- get $ uniformLocation forestProg "dX"
     dYlocation <- get $ uniformLocation forestProg "dY"
 
+    [textureU,lightU,globalAmbientU,pjMatrixU,mvMatrixU,timeU,normalMatrixU] <-
+        getUniformsSafe forestProg ["texture","light","globalAmbient","pjMatrix","mvMatrix","time","normalMatrix"]
+
     obj' <- newDefaultGlyphObjectWithClosure treeF () $ \_ -> do
                 currentProgram $= Just forestProg
-                setupTexturing woodTexture (UniformLocation 6) 0
+                setupTexturing woodTexture textureU 0
                 uniform dXlocation $= (Index1 $ (dx::GLfloat))
                 uniform dYlocation $= (Index1 $ (dy::GLfloat))
 
@@ -286,12 +302,12 @@ buildForestObject seq obj tex =
 
     return $ \rc -> do
         draw $ (prepare obj'') $ \_ -> do
-            uniform (UniformLocation 5) $= rcMVMatrix rc
-            uniform (UniformLocation 4) $= rcPMatrix rc
-            uniform (UniformLocation 7) $= rcLightPos rc
-            uniform (UniformLocation 8) $= (Index1 $ rcTime rc)
-            uniform (UniformLocation 9) $= rcNormalMatrix rc
-            uniform (UniformLocation 10) $= rcGlobalAmbient rc
+            uniform mvMatrixU $= rcMVMatrix rc
+            uniform pjMatrixU $= rcPMatrix rc
+            uniform lightU $= rcLightPos rc
+            uniform timeU $= (Index1 $ rcTime rc)
+            uniform normalMatrixU $= rcNormalMatrix rc
+            uniform globalAmbientU $= rcGlobalAmbient rc
 
 buildWaterObject :: BuilderM GLfloat a -> IO (ResourcesClosure -> IO ())
 buildWaterObject builder = do

@@ -77,22 +77,13 @@ createShaderProgramSafe shaders =
         createShaderProgram $ workingShaders shaders
         
 
-{- Get the uniform form a program. -}
-getUniform :: Uniform a => String -> IO (Maybe (StateVar a))
-getUniform name =
-    get currentProgram >>= (\pr -> case pr of
-            Just p -> liftM (Just . uniform) (get $ uniformLocation p name)
-            Nothing -> return Nothing )
-
-getUniformForProgram :: Uniform a => String -> Program -> IO (StateVar a)
-getUniformForProgram name prog =
-    liftM uniform (get $ uniformLocation prog name)
-    
-
-getUniformLocation :: String -> IO (Maybe UniformLocation)
-getUniformLocation name =
-    get currentProgram >>= maybe (return Nothing) (\prog ->
-        liftM Just (get $ uniformLocation prog name) )
+getUniformLocationsSafe :: Program -> [String] -> IO [ Maybe UniformLocation ]
+getUniformLocationsSafe prog uniforms =
+    forM uniforms $ \uniform -> do
+        tmp <- get $ uniformLocation prog uniform
+        case tmp of
+            UniformLocation (-1) -> return $ Nothing
+            _ ->  return $Just tmp
 
 loadProgramFullSafe ::
     (IsShaderSource tc,
