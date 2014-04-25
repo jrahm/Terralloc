@@ -42,11 +42,23 @@ import Foreign.Marshal.Alloc
 import System.Exit
 import System.FilePath
 import System.Random
+import qualified Data.Array.IO as ArrIO
 
 import Models
 import Debug.Trace
+import TileShow
 
+import Data.Array
 import qualified Data.StateVar as SV
+
+data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
+                Tundra | Unknown deriving (Enum,Eq)
+$(makeShow ''TileType)
+
+data Tile = Tile {
+    tileType :: TileType,
+    elevation :: Int
+} deriving Show
 
 data CameraPosition = CameraPosition {
     pEye :: Vec3 GLfloat,
@@ -71,9 +83,15 @@ data Resources = Resources {
     -- jungle :: GlyphObject (),
     -- waterObj  :: GlyphObject (),
 
-    speed :: Int,
+    speed :: GLfloat,
     timeSpeed :: Int,
-    time :: Int
+    time :: Int,
+
+    heightMap :: Array (Int,Int) Tile,
+    positionUpdate :: (Resources -> IO Resources),
+    speedFactor :: GLfloat,
+    dDown :: GLfloat,
+    waterArray :: ArrIO.IOArray (Int,Int) GLfloat
 }
 
 data ResourcesClosure = ResourcesClosure {
@@ -85,9 +103,44 @@ data ResourcesClosure = ResourcesClosure {
     , rcGlobalAmbient :: Vec4 GLfloat
     , rcCameraPos :: CameraPosition
     , rcCameraLocation :: Vec3 GLfloat
+    , rcResources :: Resources
 }
 
 $(declareSetters ''Resources)
+
+firstPerson :: Resources -> IO Resources
+firstPerson res =
+    let (CameraPosition (Vec3 (x,curh,y)) th ph) = rPosition res
+        mix a b c = a * c + b * (1 - c)
+        (_,(w,h)) = bounds $ heightMap res
+        (!!!) arr (x',y') = if x' < 0 || y' < 0 || x' > w || y' > h then -1000 else elevation (arr ! (x',y'))
+        h1 = ((/10.0).fromIntegral) (heightMap res !!! (floor x, floor y) )
+        h2 = ((/10.0).fromIntegral) (heightMap res !!! (floor x, floor (y+1)) )
+        h3 = ((/10.0).fromIntegral) (heightMap res !!! (floor (x+1), floor y) )
+        h4 = ((/10.0).fromIntegral) (heightMap res !!! (floor (x+1), floor (y+1)))
+        u = x - (int $ (floor x::Int))
+        v = y - (int $ (floor y::Int))
+        mixu1 = mix h3 h1 u
+        mixu2 = mix h4 h2 u
+        newh = mix mixu2 mixu1 v + 0.2
+        droph = curh - dDown res
+        in do
+    -- putStrLn $ "---------------"
+    -- putStrLn $ "(x,y)=" ++! (x,y)
+    -- putStrLn $ "(h1,h2,h3,h4)=" ++! (h1,h2,h3,h4)
+    -- putStrLn $ "(u,v)=" ++! (u,v) 
+    -- putStrLn $ "mixu1=" ++! mixu1 
+    -- putStrLn $ "mixu2=" ++! mixu2 
+    -- putStrLn $ "Newheight=" ++! newh
+    if newh+0.2 > droph then
+        return $ setRPosition (CameraPosition (Vec3 (x,newh,y)) th ph) $
+                 setDDown 0 $
+                    if speed res > speedFactor res then
+                        (setSpeed <..> speedFactor) res
+                        else res
+        else
+            return $ setRPosition (CameraPosition (Vec3 (x, droph, y)) th ph) $
+                     setDDown (dDown res + 0.05) res
 
 getUniformsSafe :: Program -> [String] -> IO [UniformLocation]
 getUniformsSafe prog uniforms =
@@ -140,13 +193,25 @@ eventHandle event res = do
             return $ setRPosition (CameraPosition peye (pth+(fromIntegral x/30.0)) (pph-(fromIntegral y/30.0))) res
 
         KeyDown (Keysym SDLK_w _ _) ->
-            return $ setSpeed (speed res + 1) res
+            return $ setSpeed (speed res + speedFactor res) res
         KeyDown (Keysym SDLK_s _ _) ->
-            return $ setSpeed (speed res - 1) res
+            return $ setSpeed (speed res - speedFactor res) res
         KeyUp (Keysym SDLK_w _ _) ->
-            return $ setSpeed (speed res - 1) res
+            return $ setSpeed 0 res
         KeyUp (Keysym SDLK_s _ _) ->
-            return $ setSpeed (speed res + 1) res
+            return $ setSpeed 0 res
+
+        KeyUp (Keysym SDLK_q _ _) ->
+            let getY (Vec3 (_,y,_)) = y in
+            return $
+                setPositionUpdate firstPerson $
+                setSpeedFactor 0.1 $
+                    (setDDown <..> (negate . getY . resourcesVelocity)) res
+        KeyUp (Keysym SDLK_e _ _) ->
+            return $
+                setPositionUpdate return $
+                setSpeedFactor 1 $
+                    if speed res > 0 then setSpeed 1 res else res
 
         KeyUp (Keysym SDLK_f _ _) -> do
             ret <- reshape 1920 1080 res
@@ -158,6 +223,15 @@ eventHandle event res = do
             SDL.showCursor False
             SDL.grabInput True
             return res
+
+        KeyDown (Keysym SDLK_SPACE _ _) -> do
+            return $ setDDown (-0.3) res
+
+        KeyDown (Keysym SDLK_LSHIFT _ _) -> do
+            return $ (setSpeed <..> ((*3) . speed)) res
+        KeyUp (Keysym SDLK_LSHIFT _ _) -> do
+            return $ (setSpeed <..> ((/3) . speed)) res
+
         _ -> return res
 
 displayHandle :: Resources -> IO Resources
@@ -189,20 +263,35 @@ displayHandle resources = do
                 (Vec4 globalAmbient)
                 cameraPos
                 (Vec3 $ toEuclidian (r,th,ph))
+                resources
+
                 in mapM_ (Prelude.$rc) $ routines resources
 
     SDL.glSwapBuffers
     return resources
 
+cameraToEuclidian :: CameraPosition -> Vec3 GLfloat
+cameraToEuclidian (CameraPosition _ ph th) = V.normalize $ Vec3 $ toEuclidian (1,ph,th)
+
+resourcesVelocity :: Resources -> Vec3 GLfloat
+resourcesVelocity res = speed res `vScale` cameraToEuclidian (rPosition res)
+
+resourcesUnderWater :: Resources -> IO Bool
+resourcesUnderWater res = do
+    let (CameraPosition (Vec3 (x,ch,y)) _ _) = rPosition res
+    (_,(w,h)) <- ArrIO.getBounds $ waterArray res
+    if x < 0 || y < 0 || x > int w || y > int h then return False else do
+        height <- ArrIO.readArray (waterArray res) (floor x, floor y)
+        return (height > ch && height >= 0)
+
 updateHandle :: Resources -> IO Resources
 updateHandle res = do
-   return $ setRPosition (rPosition res `cAdd` rDPosition res) $
+   (positionUpdate res) $ setRPosition (rPosition res `cAdd` rDPosition res) $
             let new = ((+) `on` (Prelude.$ res)) timeSpeed time  in
                 setTime new res
    where (CameraPosition x y z) `cAdd` (CameraPosition _ y' z') =
-           let fri = fromIntegral
-               x' = (fri $ speed res) `vScale` (V.normalize $ Vec3 $ toEuclidian (1,y, z)) in
-           (CameraPosition (x <+> x') (y + y') (z + z'))
+           let x' = speed res `vScale` (V.normalize $ Vec3 $ toEuclidian (1,y, z)) in
+            (CameraPosition (x <+> x') (y + y') (z + z'))
 
 reshape :: Int -> Int -> Resources -> IO Resources
 reshape w h res =
@@ -253,8 +342,8 @@ buildTerrainObject builder = do
                     uniform dYlocation $= Index1 (dy::GLfloat)
                     printErrors "terrainObjectClosure"
 
-    [lightposU, globalAmbientU, pjMatrixU, mvMatrixU, normalMatrixU]
-        <- getUniformsSafe terrainProg ["lightPos","globalAmbient","pjMatrix","mvMatrix","normalMatrix"]
+    [lightposU, globalAmbientU, pjMatrixU, mvMatrixU, normalMatrixU, fogU]
+        <- getUniformsSafe terrainProg ["lightPos","globalAmbient","pjMatrix","mvMatrix","normalMatrix","fog"]
     return $ \rc -> do
         draw $ prepare obj $ \_ -> do
             cullFace $= Just Front
@@ -263,6 +352,10 @@ buildTerrainObject builder = do
             uniform lightposU $= rcLightPos rc
             uniform normalMatrixU $= rcNormalMatrix rc
             uniform globalAmbientU $= rcGlobalAmbient rc
+            bool <- (resourcesUnderWater $ rcResources rc)
+            if bool then
+                uniform fogU $= Index1 (0.9::GLfloat) else
+                uniform fogU $= Index1 (0.0::GLfloat)
 
 cloudProgram :: IO (ResourcesClosure -> IO ())
 cloudProgram = do
@@ -371,6 +464,7 @@ buildWaterObject builder = do
                 setupTexturing skyTexture skyLocation 1
                 setupTexturing skyNightTexture skyNightLocation 2
             )
+    [fogU] <- getUniformsSafe waterProg ["fog"]
     return $ \rc -> do
         draw $ prepare obj $ \_ -> do
             cullFace $= Nothing
@@ -381,12 +475,17 @@ buildWaterObject builder = do
             uniform (UniformLocation 8) $= rcLightPos rc
             uniform (UniformLocation 9) $= Index1 (rcTime rc / 20.0)
             uniform (UniformLocation 10) $= rcGlobalAmbient rc
+            bool <- (resourcesUnderWater $ rcResources rc)
+            if bool then
+                uniform fogU $= Index1 (0.9::GLfloat) else
+                uniform fogU $= Index1 (0.0::GLfloat)
     
 
 makeResources :: SDL.Surface -> BuilderM GLfloat b ->
     Seq.Seq GLfloat -> Seq.Seq GLfloat ->
-    BuilderM GLfloat a -> IO Resources
-makeResources surf builder forestB jungleB water = do
+    BuilderM GLfloat a -> Array (Int,Int) Tile ->
+    ArrIO.IOArray (Int,Int) GLfloat -> IO Resources
+makeResources surf builder forestB jungleB water arr waterarr = do
     let pMatrix' = perspectiveMatrix 50 1.8 0.1 100
 
     let l_routines = sequence [
@@ -420,6 +519,11 @@ makeResources surf builder forestB jungleB water = do
         <*> pure 0
         <*> pure 1
         <*> pure 0
+        <*> pure arr
+        <*> pure return
+        <*> pure 1
+        <*> pure 0
+        <*> pure waterarr
 
 printErrors :: String -> IO ()
 printErrors ctx =
@@ -484,8 +588,8 @@ skyboxObject = do
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_T $ fromIntegral gl_CLAMP_TO_EDGE
     textureTopNight <- load "textures/skybox_top_night.png" >>= textureFromSurface
 
-    [lightposU] <- mapM (get . uniformLocation prog) 
-                    ["lightpos"]
+    [lightposU,multU] <- mapM (get . uniformLocation prog) 
+                    ["lightpos","mult"]
     topObj <- newDefaultGlyphObjectWithClosure (skyboxTop 1) () $ \_ -> do
         setupTexturing textureTop texLoc 2
         setupTexturing textureTopNight texLocNight 3
@@ -508,6 +612,10 @@ skyboxObject = do
             uniform pmatLoc $= rcPMatrix rc
             uniform matLoc $= buildMVMatrix (CameraPosition (Vec3 (0,0,0)) th ph)
             uniform (UniformLocation 1) $= rcGlobalAmbient rc
+            bool <- (resourcesUnderWater $ rcResources rc)
+            if bool then
+                uniform multU $= Index1 (0.0::GLfloat) else
+                uniform multU $= Index1 (1.0::GLfloat)
                 
     
 

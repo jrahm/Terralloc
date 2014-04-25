@@ -27,7 +27,6 @@ import Prelude as P
 import Debug.Trace
 import Data.Bits
 
-import TileShow
 import Resources
 import System.Random
 import Debug.Trace
@@ -35,15 +34,6 @@ import Debug.Trace
 import System.Environment
 import System.Exit
 
-data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
-                Tundra | Unknown deriving (Enum,Eq)
-$(makeShow ''TileType)
-
-
-data Tile = Tile {
-    tileType :: TileType,
-    elevation :: Int
-} deriving Show
 
 buildArray :: SDL.Surface -> SDL.Surface -> IO (Array (Int,Int) Tile)
 buildArray terrain height = 
@@ -56,7 +46,7 @@ buildArray terrain height =
                                 ((word `shiftR`16) .&. 0xFF) +
                                 ((word `shiftR`24) .&. 0xFF)
                     heightVal  = (fromIntegral.sumit) (getPixelUnsafe x y height)
-                    terrainVal' = Map.findWithDefault Main.Unknown terrainVal tileMap in
+                    terrainVal' = Map.findWithDefault Resources.Unknown terrainVal tileMap in
                 Tile terrainVal' heightVal
         list = map conv [(x,y) | x <- [0..w-1], y <- [0..h-1]]
 
@@ -100,7 +90,7 @@ colorArray marr = do
     return ret
 
 -- elevation quad is corner verticices
-getWaterQuads :: Array (Int,Int) Tile -> IOArray (Int,Int) Int -> IO ( BuilderM GLfloat () )
+getWaterQuads :: Array (Int,Int) Tile -> IOArray (Int,Int) Int -> IO ( Map.Map Int GLfloat, BuilderM GLfloat () )
 getWaterQuads marr arr = do
     let (_,(w,h)) = bounds marr
     let elevationCacheIO :: IO (Map.Map Int (Int,Int,Int,Int,Int))
@@ -124,8 +114,12 @@ getWaterQuads marr arr = do
                         return newmap
                 ) (Map.empty::Map.Map Int (Int,Int,Int,Int,Int)) [(x,y) | x <- [0..w], y <- [0..h]]
 
-    dat <- (liftM Map.toList elevationCacheIO)
-    return . sequence_ $ for dat $ \(_, (elev,maxx,maxy,minx,miny)) -> do
+    elevMap <- elevationCacheIO  
+    let elevMap2 = Map.map (\(elev,_,_,_,_) -> do
+                            fromIntegral elev / 10) elevMap
+
+    let dat = Map.toList elevMap
+    return (elevMap2,sequence_ $ for dat $ \(_, (elev,maxx,maxy,minx,miny)) -> do
         let mxx = fromIntegral maxx + 1
             mnx = fromIntegral minx - 1
             mxy = fromIntegral maxy + 1
@@ -135,7 +129,7 @@ getWaterQuads marr arr = do
                 [(mxx,relev,mxy),
                  (mxx,relev,mny),
                  (mnx,relev,mny),
-                 (mnx,relev,mxy)] 
+                 (mnx,relev,mxy)])
 
 
 printArray :: Array (Int,Int) Tile -> IO ()
@@ -289,7 +283,9 @@ main = do
     let !jungleLocations = runMonadPlusBuilder $ createLocations arr stgen2 2 Jungle
 
     putStrLn $ "Jungle locations: " ++! jungleLocations
-    water <- getWaterQuads arr coloredArr
+    (mapping,water) <- getWaterQuads arr coloredArr
+    coloredArr2 <- mapArray (\idx -> if idx == 0 then -1 else Map.findWithDefault (-1) idx mapping) coloredArr
+    printShowArray coloredArr2
 --  putStrLn $ "ForestLocations :" ++! forestLocations
-    makeResources surface (createBuilder arr) forestLocations jungleLocations water
+    makeResources surface (createBuilder arr) forestLocations jungleLocations water arr coloredArr2
         >>= startPipeline reshape eventHandle displayHandle updateHandle;

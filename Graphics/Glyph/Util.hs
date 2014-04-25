@@ -310,3 +310,6 @@ for = flip map
 distribMaybe :: Maybe (a,b) -> (Maybe a, Maybe b)
 distribMaybe Nothing = (Nothing,Nothing)
 distribMaybe (Just (a,b)) = (Just a, Just b)
+
+whenM :: IO Bool -> IO () -> IO ()
+whenM b = (>>=) b . flip when

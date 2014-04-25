@@ -12,6 +12,7 @@ uniform sampler2D texture ;
 uniform sampler2D skytex ;
 uniform sampler2D skynight ;
 uniform vec4 lightpos ;
+uniform float fog ;
 
 in vec3 normal ;
 in vec4 position ;
@@ -79,6 +80,6 @@ void main() {
  //   frag_color = vec4( 0,0,1, 1.0 );
     // frag_color = vec4(tex_x,tex_y,0,1.0) ;
     // vec4 color = sample(0,0);
-    frag_color = vec4(vec3(refcolor) * vec3(0.6,0.8,1.0),0.95) * vec4(normalize(globalAmbient.xyz),1.0);
+    frag_color = vec4(vec3(refcolor) * vec3(0.6,0.8,1.0) / (-position.z*fog+1),0.95) * vec4(normalize(globalAmbient.xyz),1.0);
 //    frag_color = vec4(0,0,1,0.8) ;
 }

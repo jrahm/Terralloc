@@ -13,6 +13,8 @@ uniform sampler2D night_tex ;
 in vec2 texcoord;
 in vec4 position ;
 
+uniform float mult ;
+
 float exp1( float x ) {
     return 2 / (1+exp(-x))-1;
 }
@@ -28,6 +30,6 @@ void main() {
         mix(texture2D(night_tex,texcoord) * (1-globalAmbient.a),
             texture2D(texture,texcoord) * vec4(normalize(globalAmbient.xyz),1),
             (globalAmbient.a + 1) / 2) * 1.8 ;
-    frag_color = frag_color + mul ;
+    frag_color = (frag_color + mul)*mult ;
 
 }

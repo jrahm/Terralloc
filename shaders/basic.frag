@@ -12,6 +12,8 @@ uniform float dY ;
 uniform mat4 mvMatrix ;
 uniform mat4 pjMatrix ;
 
+uniform float fog ;
+
 in vec3 normal ;
 
 uniform sampler2D textures[8] ;
@@ -81,5 +83,5 @@ void main() {
     float prod = dot( normalize(-newNorm), normalize(vec3(lightPos - position)));
     vec3 intensity = vec3(prod,prod,max(prod,0.4)) ;
 
-    frag_color = vec4(color * intensity,1) * vec4(normalize(globalAmbient.xyz),1.0);
+    frag_color = vec4(color * intensity / (-position.z*fog+1),1) * vec4(normalize(globalAmbient.xyz),1.0);
 }
