@@ -1,5 +1,5 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# OPTIONS_GHC -XFlexibleInstances #-}
+{-# LANGUAGE FlexibleInstances #-}
 module Graphics.Glyph.GLMath where
     import Graphics.Glyph.Mat4
     import qualified Graphics.Rendering.OpenGL as GL
@@ -19,6 +19,7 @@ module Graphics.Glyph.GLMath where
                                 GL.get (uniform loc)
                             return (Vec3 (x,y,z)) )
                         (\(Vec3 (x,y,z)) -> uniform loc GL.$= Vertex3 x y z)
+        uniformv _ = undefined
 
     instance UniformComponent a => Uniform (Vec4 a) where
         uniform loc = GL.makeStateVar
@@ -27,6 +28,7 @@ module Graphics.Glyph.GLMath where
                                 GL.get (uniform loc)
                             return (Vec4 (x,y,z,w)) )
                         (\(Vec4 (x,y,z,w)) -> uniform loc GL.$= GL.Vertex4 x y z w)
+        uniformv _ = undefined
 
     class (Floating flT) => Vector flT b where
         (<+>) :: b flT -> b flT -> b flT
@@ -83,14 +85,14 @@ module Graphics.Glyph.GLMath where
     (×) = cross
 
     lookAtMatrix :: Vec3 GLfloat -> Vec3 GLfloat -> Vec3 GLfloat -> Mat4 GLfloat
-    lookAtMatrix e@(Vec3 (ex,ey,ez)) c u =
+    lookAtMatrix e c u =
         let f@(Vec3 (fx,fy,fz)) = normalize (c <-> e)
             s@(Vec3 (sx,sy,sz)) = normalize (f × u)
             u'@(Vec3 (ux,uy,uz))   = s × f in 
                Matrix4 (sx, ux, -fx, 0,
                        sy, uy, -fy, 0,
                        sz, uz, -fz, 0,
-                       -(s<.>e) , -(u'<.>e),  (f<.>e),  1 )
+                       -(s<.>e) , -(u'<.>e),  f<.>e,  1 )
 
     orthoMatrix :: GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> GLfloat -> Mat4 GLfloat
     orthoMatrix top bot right left near far =
@@ -107,7 +109,7 @@ module Graphics.Glyph.GLMath where
             res22 = - (zf + zn) / (zf - zn)
             res23 = - 1
             res32 = - (2 * zf * zn) / (zf - zn) in
-        trace ("res22=" ++ (show res22)) $
+        trace ("res22=" ++ show res22) $
         Matrix4 (res00, 0, 0, 0,
                 0, res11, 0, 0,
                 0, 0, res22, res23,
@@ -161,8 +163,8 @@ module Graphics.Glyph.GLMath where
                 m20,m21,m22,m23,
                 m30,m31,m32,m33)) vec =
                     let (Vec4 (v0,v1,v2,v3)) = mat -*| vec in
-                    (Matrix4 (m00,m01,m02,m03,
+                    Matrix4 (m00,m01,m02,m03,
                              m10,m11,m12,m13,
                              m20,m21,m22,m23,
-                             m30+v0,m31+v1,m32+v2,m33+v3))
+                             m30+v0,m31+v1,m32+v2,m33+v3)
                     

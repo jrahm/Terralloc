@@ -4,19 +4,15 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 module Graphics.Glyph.BufferBuilder where
 
-import Control.Monad
 import Graphics.Rendering.OpenGL
 import Foreign.Storable
 import Foreign.Ptr
 import Foreign.Marshal.Array
 import Data.Array.Storable
-import Data.Setters
-import Debug.Trace
 import qualified Data.Foldable as Fold
 import Data.Sequence as Seq
 import Data.Map as Map
 
-import Graphics.Glyph.Mat4
 import Graphics.Glyph.Util
 import Graphics.Glyph.GLMath
 
@@ -117,7 +113,7 @@ instance (Num t) => Monad (BuilderM t) where
                 | otherwise = Builder b1 b2
             (Builder !b1 !b2)  ><> leaf@(LeafBuilder !_)  =
                 (Builder b1 (b2 ><> leaf))
-            builder1 ><> builder2 = (Builder builder1 builder2)
+            builder1' ><> builder2' = (Builder builder1' builder2')
 
     b1@(BuilderM _ ret) >>= func = b1 >> func ret
 
@@ -126,33 +122,33 @@ instance (Num t) => Monad (BuilderM t) where
 
 instance Functor Builder where
     fmap f (Builder b1 b2) = (Builder (fmap f b1) (fmap f b2))
-    fmap f (LeafBuilder seq) = (LeafBuilder (fmap f seq))
+    fmap f (LeafBuilder seq') = (LeafBuilder (fmap f seq'))
 
 instance Fold.Foldable Builder where
     foldl f ini (Builder b1 b2) = 
         Fold.foldl f (Fold.foldl f ini b1) b2
-    foldl f ini (LeafBuilder seq) =
-        Fold.foldl f ini seq
+    foldl f ini (LeafBuilder seq') =
+        Fold.foldl f ini seq'
 
     foldr f ini (Builder b1 b2) = 
         Fold.foldr f (Fold.foldr f ini b2) b1
-    foldr f ini (LeafBuilder seq) =
-        Fold.foldr f ini seq
+    foldr f ini (LeafBuilder seq') =
+        Fold.foldr f ini seq'
 
 expandBuilder :: Builder a -> b -> (b -> a -> (b,[a])) -> Builder a
 expandBuilder builder ini f = snd $ expandBuilder' builder ini f
     where expandBuilder' :: Builder a -> b -> (b -> a -> (b,[a])) -> (b,Builder a)
 
-          expandBuilder' (Builder builder1 builder2) ini f = 
-            let (snowball1,newBuilder1) = expandBuilder' builder1 ini f
-                (snowball2,newBuilder2) = expandBuilder' builder2 snowball1 f in
+          expandBuilder' (Builder builder1 builder2) ini' f' = 
+            let (snowball1,newBuilder1) = expandBuilder' builder1 ini' f'
+                (snowball2,newBuilder2) = expandBuilder' builder2 snowball1 f' in
                 (snowball2,Builder newBuilder1 newBuilder2)
 
-          expandBuilder' (LeafBuilder seq1) ini f = 
-            let (seq,snow) = Fold.foldl' (\(seq', snow) datum -> 
-                            let (snow',lst) = f snow datum in
-                            (seq' >< Seq.fromList lst,snow')) (Seq.empty,ini) seq1 in
-                (snow,LeafBuilder seq)
+          expandBuilder' (LeafBuilder seq1) initial func = 
+            let (sequ,snow) = Fold.foldl' (\(seq', snowball) datum -> 
+                            let (snow',lst) = func snowball datum in
+                            (seq' >< Seq.fromList lst,snow')) (Seq.empty,initial) seq1 in
+                (snow,LeafBuilder sequ)
 
 {- Add a vertex to the current builder -}
 bVertex3 :: (a,a,a) -> BuilderM a ()
@@ -313,4 +309,3 @@ translating trans (BuilderM builder ret) = do
                 case datum of
                     VertexLink tup -> VertexLink $ zipWithT3 (+) tup trans
                     _ -> datum) ret
-translating _ x = x

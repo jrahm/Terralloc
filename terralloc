@@ -1,0 +1,3 @@
+#!/bin/bash
+
+dist/build/final/final +RTS -K3000000000 -RTS $@

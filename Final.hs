@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE FlexibleContexts #-}
@@ -10,11 +9,9 @@ import Graphics.UI.SDL.Image as SDLImg
 import Graphics.UI.SDL as SDL
 import Graphics.SDL.SDLHelp
 import Graphics.Glyph.Util
-import Graphics.Glyph.ExtendedGL
 import Control.Monad
 
 import Graphics.Glyph.BufferBuilder
-import Graphics.Glyph.ObjLoader
 
 import qualified Data.Map as Map
 import Data.Word
@@ -24,50 +21,80 @@ import Data.Array.IO
 import Data.Sequence as Seq
 import Prelude as P
 
-import Debug.Trace
 import Data.Bits
 
 import Resources
 import System.Random
-import Debug.Trace
 
 import System.Environment
-import System.Exit
 
 
-buildArray :: SDL.Surface -> SDL.Surface -> IO (Array (Int,Int) Tile)
+{-
+ - This function builds an array of tile from the heightmap and
+ - terrain map passed as SDL surfaces.
+ -
+ - Returns: An array with bounds [(0,0),(w,h)] of tiles where
+ - w is the minimum width of the two images and h is the minimum
+ - height.
+ -}
+buildArray :: SDL.Surface -> SDL.Surface -> Array (Int,Int) Tile
 buildArray terrain height = 
+    {- Pick the minimum width and height between the two images -}
     let w = min (SDL.surfaceGetWidth terrain) $ SDL.surfaceGetWidth height
         h = min (SDL.surfaceGetHeight terrain) $ SDL.surfaceGetHeight height
+
+        {- Function that returns a Tile for an x y coordinate -}
         conv (x,y) = 
                 let terrainVal = fromIntegral $ getPixelUnsafe x y terrain
+                    {- The height is encoded as the sum of the color channels, to make life a litte
+                     - easier on the heightmap reader. -}
                     sumit word =
                                 ((word `shiftR` 8) .&. 0xFF) +
                                 ((word `shiftR`16) .&. 0xFF) +
                                 ((word `shiftR`24) .&. 0xFF)
+
+                    {- The value of the hightmap at the coordinate. I will promise
+                     - the compmiler that my surfaces will not change. -}
                     heightVal  = (fromIntegral.sumit) (getPixelUnsafe x y height)
+
+                    {- The value of the terrain map at thata location -}
                     terrainVal' = Map.findWithDefault Resources.Unknown terrainVal tileMap in
                 Tile terrainVal' heightVal
+
+        {- build the list of Tiles to jam into the array -}
         list = map conv [(x,y) | x <- [0..w-1], y <- [0..h-1]]
+        in listArray ((0,0),(w-1,h-1)) list
 
-        in do
-            putStrLn $ show (head list)
-            return $ listArray ((0,0),(w-1,h-1)) list
-
--- colors regions of water in the array
+{- This function takes the array generated in the function from above and
+ - creates a new array that colors in the array with locations of bodies
+ - of water and assigns an id to each of them. This allows for me to go
+ - back and assign heights for the bodies of water. -}
 colorArray :: Array (Int,Int) Tile -> IO (IOArray (Int,Int) Int)
 colorArray marr = do
-    let pollseq (Seq.viewl -> (head :< tail)) = (head,tail)
+    
+    {- Very simple function that take splits a sequence
+     - into a head and a tail -}
+    let pollseq (Seq.viewl -> (head' :< tail')) = (head',tail')
+        pollseq _ = undefined
+
     let bnd@(_,(w,h)) = bounds marr
     ret <- newArray bnd 0
-    let myfunction place = do
-            val <- readArray ret place
-            case marr ! place of
+
+    {- Boolean funcion. Returns true if the
+     - tile at the position `place` is water
+     - and has not yet been assigned an id -}
+    let myfunction a_place = do
+            val <- readArray ret a_place
+            case marr ! a_place of
                 (Tile Water _) -> return $ val==0
                 _ -> return False
+
+    {- Uses a queue method to flood fill bodies
+     - of water and write that to an array -}
     let floodfill :: (Int,Int) -> ((Int,Int) -> IO Bool) -> Int -> IO ()
         floodfill start func' val = do
             let func t@(x,y) = if not (x <= w && x >= 0 && y <= h && y >= 0) then return False else func' t
+            {- Just magic. Does a flood fill  -}
             _ <- untilM2 (return . Seq.null) (Seq.singleton start) $ \queue -> do
                     let (head',tail') = pollseq queue
                     bool <- func head'
@@ -80,6 +107,8 @@ colorArray marr = do
                             return ((x-1,y), queue' |> (x,y-1) |> (x,y+1))
                         return tail3
             return ()
+    {- Iterates through all the points and does a flood fill on
+     - them -}
     foldM_ (\val place -> do
         bool <- myfunction place
         if bool then do
@@ -89,37 +118,50 @@ colorArray marr = do
         ) 1 [(x,y) | x <- [0..w], y <- [0..h]]
     return ret
 
--- elevation quad is corner verticices
+{- This function takes the two arrays from the functions above and generates
+ - 2 things:
+ - A map of water bodies ids to elevations (to detect if you are under water
+ - A builder that will generate all of the quads for the water. -}
 getWaterQuads :: Array (Int,Int) Tile -> IOArray (Int,Int) Int -> IO ( Map.Map Int GLfloat, BuilderM GLfloat () )
 getWaterQuads marr arr = do
     let (_,(w,h)) = bounds marr
+
+    {- Iterates through the bodies of water and finds the lowest altitude
+     - of the land surrounding the water. Returns a type of body id
+     - to minx, miny, maxx, maxy and elevation -}
     let elevationCacheIO :: IO (Map.Map Int (Int,Int,Int,Int,Int))
         elevationCacheIO = do
+            {- Tuple of functions that will be mapped with 
+             - the application operator ($) -}
             let tup = (min,max,max,min,min)
             foldM (\themap (x,y) -> do
                     bodyID <- readArray arr (x,y)
                     if bodyID == 0 then return themap else do
-                        let valid (x,y) = x >= 0 && x <= w && y >= 0 && y <= h
-                        let neighbors (x,y) = P.filter valid $ map (zipWithT2 (+) (x,y))
+                        let valid (aX,aY) = aX >= 0 && aX <= w && aY >= 0 && aY <= h
+                        let neighbors (aX,aY) = P.filter valid $ map (zipWithT2 (+) (aX,aY))
                                                 [      (1,0),       
                                                  (0,1),      (0,-1),
                                                        (-1,0)      ]
-                        let toelev x = 
-                             let tile = marr ! x in
+                        let toelev aX = 
+                             let tile = marr ! aX in
                              (tileType tile == Water) ? 1000000000000 $ elevation tile
                         let elev = minimum $ map toelev (neighbors (x,y))
-                        let newmap = Map.insertWith (\old->
-                                            zipWithT5 (P.$) (zipWithT5 (P.$) tup old)
-                                        ) bodyID (elev,x,y,x,y) themap
+                        let newmap =
+                             Map.insertWith (zipWithT5 (P.$) . (zipWithT5 (P.$) tup))
+                                bodyID (elev,x,y,x,y) themap
                         return newmap
                 ) (Map.empty::Map.Map Int (Int,Int,Int,Int,Int)) [(x,y) | x <- [0..w], y <- [0..h]]
 
     elevMap <- elevationCacheIO  
-    let elevMap2 = Map.map (\(elev,_,_,_,_) -> do
+
+    {- A map between body id and elevation. Get rid of the bounding quad box -}
+    let elevMap2 = Map.map (\(elev,_,_,_,_) ->
                             fromIntegral elev / 10) elevMap
 
     let dat = Map.toList elevMap
-    return (elevMap2,sequence_ $ for dat $ \(_, (elev,maxx,maxy,minx,miny)) -> do
+    {- Iterate through the map and draw the bounding quad
+     - for the body of water -}
+    return (elevMap2,sequence_ $ for dat $ \(_, (elev,maxx,maxy,minx,miny)) ->
         let mxx = fromIntegral maxx + 1
             mnx = fromIntegral minx - 1
             mxy = fromIntegral maxy + 1
@@ -139,12 +181,12 @@ printArray arr = do
     putStrLn $ "h=" ++! (h+1)
     forM_ [0..h] $ \y -> do
         forM_ [0..w] $ \x -> do
-            let next = arr ! (x,y)
-            putStr $ (show $ tileType next) 
+            let lNext = arr ! (x,y)
+            putStr $ show $ tileType lNext  
         putStr "    "
         forM_ [0..w] $ \x -> do
-            let next = arr ! (x,y)
-            putStr $ (elevShow $ elevation next) 
+            let lNext = arr ! (x,y)
+            putStr $ elevShow $ elevation lNext  
         putStrLn ""
     where elevShow x = 
             let len = P.length elevMap
@@ -152,16 +194,19 @@ printArray arr = do
             if nx >= len then "=" else [elevMap !! nx]
           elevMap = "`.,-~*<:!;%&#@0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
+printShowArray :: (Show a) => IOArray (Int,Int) a -> IO ()
 printShowArray arr = do
     (_,(w,h)) <- getBounds arr
     putStrLn $ "w=" ++! (w+1)
     putStrLn $ "h=" ++! (h+1)
     forM_ [0..h] $ \y -> do
         forM_ [0..w] $ \x -> do
-            next <- readArray arr (x,y)
-            putStr $ (show $ next) 
+            lNext <- readArray arr (x,y)
+            putStr $ show lNext 
         putStrLn ""
 
+{- The colors each tile type is mapped to
+ - as an array -}
 toColor :: TileType -> (GLfloat,GLfloat,GLfloat,GLfloat)
 toColor Tundra = (0.5,0.5,0.5,1.0)
 toColor Mountains = (0.5,0.4,0.03,1.0)
@@ -170,7 +215,10 @@ toColor Jungle = (0,1.0,0.0,1.0)
 toColor Forest = (0,0.2,0.0,1.0)
 toColor Beach = (0.7,0.7,0.6,1.0)
 toColor Water = (0,0,1.0,1.0)
+toColor Resources.Unknown = (0,0,0,0)
 
+{- Map of color to TileType used for
+ - parsing the terrain map -}
 tileMap :: Map.Map Word32 TileType
 tileMap =
     let c = rgbToWord in
@@ -196,7 +244,7 @@ createBuilder arr = do
 
             [(x,y) | x <- [1..w], y <- [1..h]]
 
-    inferingNormals $ do
+    inferingNormals $
         forM_ (trianglesFromQuads lst) $ \(x,y,z,_) -> do
             let f = fromIntegral
             let bUseTexture a = bColor4 (0,0,0,f a)
@@ -212,21 +260,21 @@ createLocations arr gen density typ = do
 
     let run :: [Int] -> (Int,Int) -> MonadPlusBuilder ( Seq.Seq GLfloat ) [Int]
         run rs (x,y) = do
-            let ((_:he), t) = P.splitAt (head rs `mod` density + 1) rs
+            let (_:he, t) = P.splitAt (head rs `mod` density + 1) rs
             let signum' = floor.signum
 
-            when (isType x y typ) $ do
-                forM_ he $ \rand -> do
+            when (isType x y typ) $
+                forM_ he $ \rand ->
                     let (a',b',c) = toTup rand
-                    let (a,b) = (f a', f b')
-                    let [sx,sy,sz,rot,noise] = (P.take 5 $ randomRs (0.0,1.0) $ mkStdGen c)
+                        (a,b) = (f a', f b')
+                        [sx,sy,sz,rot,noise] = (P.take 5 $ randomRs (0.0,1.0) $ mkStdGen c)
 
-                    let elev = getElev x y
-                    let elev_dx = getElev (x + signum' a) y
-                    let elev_dy = getElev x (y + signum' b)
-                    let realelev =
-                         ((elev * (1-abs a) + elev_dx * (abs a)) +
-                          (elev * (1-abs b) + elev_dy * (abs b))) / 2.0
+                        elev = getElev x y
+                        elev_dx = getElev (x + signum' a) y
+                        elev_dy = getElev x (y + signum' b)
+                        realelev =
+                         ((elev * (1-abs a) + elev_dx * abs a) +
+                          (elev * (1-abs b) + elev_dy * abs b)) / 2.0 in
 
                     when (elev_dx > 0 && elev_dy > 0) $
                             plusM $ Seq.fromList [
@@ -244,10 +292,9 @@ createLocations arr gen density typ = do
     foldM_ run (randoms gen) [(x,y) | x <- [1..w], y <- [1..h]]
 
     return ()
-    where isType x y t =
-            (tileType $ arr ! (x,y)) == t
+    where isType x y t = tileType (arr ! (x,y)) == t
           f x = (fromIntegral x - 128) / 128 * (sqrt 2 / 2)
-          toTup x = ( (x .&. 0xFF),
+          toTup x = (  x .&. 0xFF ,
                       (x `shiftR` 8) .&. 0xFF,
                       (x `shiftR` 16) .&. 0xFF)
         
@@ -266,7 +313,7 @@ main = do
             _ -> sequence [SDLImg.load "maps/wonderland_terrain.png", SDLImg.load "maps/wonderland_height.png"]
     putStrLn "Done Loading ..."
 
-    arr <- buildArray terrain height
+    let arr = buildArray terrain height
     putStrLn "Array Built"
     printArray arr
     coloredArr <- colorArray arr

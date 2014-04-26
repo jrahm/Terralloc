@@ -8,7 +8,7 @@ import Foreign.Marshal.Array
 import Foreign.Ptr
 import Foreign.Storable
 
-import Graphics.Rendering.OpenGL (GLfloat,Uniform(..),uniform,UniformLocation(..),makeStateVar)
+import Graphics.Rendering.OpenGL (Uniform(..),uniform,UniformLocation(..),makeStateVar)
 import Graphics.Rendering.OpenGL.Raw.Core31
 
 data Mat4 a = Matrix4 (a,a,a,a,
@@ -89,9 +89,10 @@ instance Uniform (Mat4 GLfloat) where
                           getter :: IO (Mat4 GLfloat)
                           getter = do
                                 pid <- liftM fromIntegral getCurrentProgram
-                                ( allocaArray 16 $ \buf -> do
+                                allocaArray 16 $ \buf -> do
                                     glGetUniformfv pid loc buf
-                                    fromPtr buf return )
+                                    fromPtr buf return
+    uniformv _ = undefined
 
 instance Uniform (Mat3 GLfloat) where
     uniform (UniformLocation loc)  = makeStateVar getter setter
@@ -100,9 +101,10 @@ instance Uniform (Mat3 GLfloat) where
                           getter :: IO (Mat3 GLfloat)
                           getter = do
                                 pid <- liftM fromIntegral getCurrentProgram
-                                ( allocaArray 9 $ \buf -> do
+                                allocaArray 9 $ \buf -> do
                                     glGetUniformfv pid loc buf
-                                    fromPtr buf return )
+                                    fromPtr buf return
+    uniformv _ = undefined
 
 getCurrentProgram :: IO GLint
 getCurrentProgram = alloca $ glGetIntegerv gl_CURRENT_PROGRAM >> peek
@@ -206,10 +208,10 @@ transpose4 (Matrix4
                 (m00,m01,m02,m03,
                  m10,m11,m12,m13,
                  m20,m21,m22,m23,
-                 m30,m31,m32,m33 ))  = (Matrix4 (m00, m10, m20, m30,
+                 m30,m31,m32,m33 ))  = Matrix4 (m00, m10, m20, m30,
                                                 m01, m11, m21, m31,
                                                 m02, m12, m22, m32,
-                                                m03, m13, m23, m33))
+                                                m03, m13, m23, m33)
 scale4 :: (Num a) => a -> Mat4 a -> Mat4 a
 scale4 n (Matrix4 (m11,m12,m13,m14,m21,m22,m23,m24,m31,m32,m33,m34,m41,m42,m43,m44)) =
     Matrix4 (m11*n,m12*n,m13*n,m14*n,m21*n,m22*n,m23*n,m24*n,m31*n,m32*n,m33*n,m34*n,m41*n,m42*n,m43*n,m44*n)
@@ -256,4 +258,4 @@ trunc4 (Matrix4
           _ , _ , _ ,_)) = Matrix3 (m11,m12,m13,m21,m22,m23,m31,m32,m33)
 
 toNormalMatrix :: (RealFloat a,Eq a) => Mat4 a -> Maybe (Mat3 a)
-toNormalMatrix mat = inv4 mat >>= return . trunc4 . transpose4
+toNormalMatrix mat = liftM (trunc4 . transpose4) $ inv4 mat 
