@@ -147,7 +147,7 @@ getWaterQuads marr arr = do
                              (tileType tile == Water) ? 1000000000000 $ elevation tile
                         let elev = minimum $ map toelev (neighbors (x,y))
                         let newmap =
-                             Map.insertWith (zipWithT5 (P.$) . (zipWithT5 (P.$) tup))
+                             Map.insertWith (zipWithT5 (P.$) . zipWithT5 (P.$) tup)
                                 bodyID (elev,x,y,x,y) themap
                         return newmap
                 ) (Map.empty::Map.Map Int (Int,Int,Int,Int,Int)) [(x,y) | x <- [0..w], y <- [0..h]]
@@ -230,6 +230,8 @@ tileMap =
     Map.insert    (c 255 255 255) Beach  $
     Map.singleton (c 0 0 255) Water
 
+{- The function that generates the builder that will
+ - generate the VAO for the terrain based on the heightmap -}
 createBuilder :: Array (Int,Int) Tile -> BuilderM GLfloat ()
 createBuilder arr = do
     let (_,(w,h)) = bounds arr
@@ -247,46 +249,63 @@ createBuilder arr = do
     inferingNormals $
         forM_ (trianglesFromQuads lst) $ \(x,y,z,_) -> do
             let f = fromIntegral
+
+            {- Store the texture to use in the color -}
             let bUseTexture a = bColor4 (0,0,0,f a)
-            -- TODO un hardcode these
+
             bUseTexture $ fromEnum (tileType $ arr ! (x,z))
             bTexture2 (f x / 10.0, f z / 10.0)
             bVertex3 (f x, y,f z)
             
+{- Generates random locations for the trees inside of the terrain
+ - spots where trees may exist 
+ -
+ - A MonadPlusBuilder is a Monad used to build monad pluses; in this
+ - case a Sequence.
+ -}
 createLocations :: Array (Int,Int) Tile -> StdGen -> Int -> TileType -> MonadPlusBuilder (Seq.Seq GLfloat) ()
 createLocations arr gen density typ = do
     let (_,(w,h)) = bounds arr
     let getElev x y = if x >= w || y >= h || x < 0 || y < 0 then 0 else fromIntegral (elevation $ arr ! (x,y)) /10.0
 
+    {- Adds a random number of trees between 0 and density for the location -}
     let run :: [Int] -> (Int,Int) -> MonadPlusBuilder ( Seq.Seq GLfloat ) [Int]
-        run rs (x,y) = do
-            let (_:he, t) = P.splitAt (head rs `mod` density + 1) rs
-            let signum' = floor.signum
+        run rs (x',y') = do
+            let (_:ntrees, t) = P.splitAt (head rs `mod` density + 1) rs
 
-            when (isType x y typ) $
-                forM_ he $ \rand ->
+            when (isType x' y' typ) $
+                {- Iterate and place n trees -}
+                forM_ ntrees $ \rand ->
                     let (a',b',c) = toTup rand
-                        (a,b) = (f a', f b')
-                        [sx,sy,sz,rot,noise] = (P.take 5 $ randomRs (0.0,1.0) $ mkStdGen c)
+                        (x,y) = (int x' + f a', int y' + f b') :: (GLfloat,GLfloat)
+                        [sx,sy,sz,rot,noise,shade] = (P.take 6 $ randomRs (0.0,1.0) $ mkStdGen c)
 
-                        elev = getElev x y
-                        elev_dx = getElev (x + signum' a) y
-                        elev_dy = getElev x (y + signum' b)
-                        realelev =
-                         ((elev * (1-abs a) + elev_dx * abs a) +
-                          (elev * (1-abs b) + elev_dy * abs b)) / 2.0 in
+                        {- Boiler for finding the correct elevation between vertices -}
+                        h1 = getElev (floor x) (floor y)
+                        h2 = getElev (floor x) (floor (y+1))
+                        h3 = getElev (floor (x+1)) (floor y)
+                        h4 = getElev (floor (x+1)) (floor (y+1))
+                        u = fpart x
+                        v = fpart y
+                        mixu1 = mix h3 h1 u
+                        mixu2 = mix h4 h2 u
+                        newh = mix mixu2 mixu1 v in
 
-                    when (elev_dx > 0 && elev_dy > 0) $
-                            plusM $ Seq.fromList [
+                        {- Add to the sequence of elements. This
+                         - will be turned into a per-instance VAO -}
+                        plusM $ Seq.fromList [
                                     -- translation
-                                    fromIntegral x+a,realelev,fromIntegral y+b,
+                                    x,newh-0.2,y,
                                     -- scale
                                     sx+0.5,sy+0.5,sz+0.5,
                                     -- rotation
                                     sin (rot*6.4), cos(rot*6.4),
                                     -- noise
-                                    noise*6.4
+                                    noise*6.4,
+                                    shade / 2 + 0.75
                                 ]
+
+            {- Return the tail of the randomly generated numbers -}
             return t
 
     foldM_ run (randoms gen) [(x,y) | x <- [1..w], y <- [1..h]]
@@ -305,34 +324,30 @@ main = do
          [ SDLImg.load $ "maps/"++str++"_terrain.png",
            SDLImg.load $ "maps/"++str++"_height.png" ]
     args <- getArgs
-    putStrLn "Loading..."
+
+    {- Load the terrain and heightmaps from SDL. -}
     [terrain,height] <- 
         case args of 
             (ter:hei:_) -> sequence [SDLImg.load ter, SDLImg.load hei]
             (m:_) -> doload m
             _ -> sequence [SDLImg.load "maps/wonderland_terrain.png", SDLImg.load "maps/wonderland_height.png"]
-    putStrLn "Done Loading ..."
 
     let arr = buildArray terrain height
-    putStrLn "Array Built"
-    printArray arr
     coloredArr <- colorArray arr
-    printShowArray coloredArr
 
-    surface <- simpleStartup "Spectical" (640,480)
+    surface <- simpleStartup "Terralloc" (1280,1024)
     stgen <- newStdGen
     stgen2 <- newStdGen
 
---    (log',file) <- loadObjFile "tree.obj"
---    mapM_ putStrLn log'
-
+    {- Create the tree locations. Desity of 7 for the forest, 2 for the jungle
+     - since the jungle model is bigger -}
     let !forestLocations = runMonadPlusBuilder $ createLocations arr stgen 7 Forest
     let !jungleLocations = runMonadPlusBuilder $ createLocations arr stgen2 2 Jungle
 
-    putStrLn $ "Jungle locations: " ++! jungleLocations
     (mapping,water) <- getWaterQuads arr coloredArr
     coloredArr2 <- mapArray (\idx -> if idx == 0 then -1 else Map.findWithDefault (-1) idx mapping) coloredArr
     printShowArray coloredArr2
---  putStrLn $ "ForestLocations :" ++! forestLocations
+
+    {- Kick off SDL with the callbacks defined in Resources -}
     makeResources surface (createBuilder arr) forestLocations jungleLocations water arr coloredArr2
         >>= startPipeline reshape eventHandle displayHandle updateHandle;

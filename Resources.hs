@@ -12,7 +12,6 @@ import Foreign.Marshal.Array
 import Graphics.Glyph.GLMath as V
 import Graphics.Glyph.GlyphObject
 import Graphics.Glyph.ObjLoader
-import Graphics.Glyph.GeometryBuilder as GB
 import Graphics.Glyph.Shaders
 import Graphics.SDL.SDLHelp
 import Graphics.Glyph.BufferBuilder
@@ -28,46 +27,42 @@ import Control.Monad
 import Data.Angle
 import Data.Function
 import Data.Setters
-import Data.Word
-import qualified Data.Array.Storable as SA
 import qualified Data.Sequence as Seq
-import Data.Sequence ((><),(|>),(<|))
 import qualified Data.Foldable as Fold
 import Data.Maybe
 import Debug.Trace
 
-import Foreign.Marshal.Array
-import Foreign.Marshal.Alloc
-
 import System.Exit
-import System.FilePath
-import System.Random
 import qualified Data.Array.IO as ArrIO
 
-import Models
-import Debug.Trace
 import TileShow
 
 import Data.Array
 import qualified Data.StateVar as SV
 
+{- Types of terrain which are possible -}
 data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
                 Tundra | Unknown deriving (Enum,Eq)
 $(makeShow ''TileType)
 
+{- A tile has 2 things, a type and
+ - elevation, however, the term tile is
+ - a litte misleading, it is really a point. -}
 data Tile = Tile {
     tileType :: TileType,
     elevation :: Int
 } deriving Show
 
+{- Position of the camera as described by
+ - polar coordinates -}
 data CameraPosition = CameraPosition {
     pEye :: Vec3 GLfloat,
     pTh :: GLfloat,
     pPh :: GLfloat
 } deriving Show
 
-data ObjectData = ObjectData Program
-
+{- The central data type for rendering
+ - the scene. Contains the 'global' information -}
 data Resources = Resources {
     rSurface :: SDL.Surface,
 
@@ -78,10 +73,6 @@ data Resources = Resources {
     mvMatrix :: Mat4 GLfloat,
 
     routines :: [ResourcesClosure -> IO ()],
-    -- object :: GlyphObject (),
-    -- forest :: GlyphObject (),
-    -- jungle :: GlyphObject (),
-    -- waterObj  :: GlyphObject (),
 
     speed :: GLfloat,
     timeSpeed :: Int,
@@ -94,6 +85,7 @@ data Resources = Resources {
     waterArray :: ArrIO.IOArray (Int,Int) GLfloat
 }
 
+{- Central data type for rendering each frame -}
 data ResourcesClosure = ResourcesClosure {
       rcMVMatrix :: Mat4 GLfloat
     , rcPMatrix  :: Mat4 GLfloat
@@ -108,10 +100,11 @@ data ResourcesClosure = ResourcesClosure {
 
 $(declareSetters ''Resources)
 
+{- A function that makes the resources data first
+ - person -}
 firstPerson :: Resources -> IO Resources
 firstPerson res =
     let (CameraPosition (Vec3 (x,curh,y)) th ph) = rPosition res
-        mix a b c = a * c + b * (1 - c)
         (_,(w,h)) = bounds $ heightMap res
         (!!!) arr (x',y') = if x' < 0 || y' < 0 || x' > w || y' > h then -1000 else elevation (arr ! (x',y'))
         h1 = ((/10.0).fromIntegral) (heightMap res !!! (floor x, floor y) )
@@ -125,33 +118,32 @@ firstPerson res =
         newh = mix mixu2 mixu1 v + 0.2
         droph = curh - dDown res
         in do
-    -- putStrLn $ "---------------"
-    -- putStrLn $ "(x,y)=" ++! (x,y)
-    -- putStrLn $ "(h1,h2,h3,h4)=" ++! (h1,h2,h3,h4)
-    -- putStrLn $ "(u,v)=" ++! (u,v) 
-    -- putStrLn $ "mixu1=" ++! mixu1 
-    -- putStrLn $ "mixu2=" ++! mixu2 
-    -- putStrLn $ "Newheight=" ++! newh
-    if newh+0.2 > droph then
-        return $ setRPosition (CameraPosition (Vec3 (x,newh,y)) th ph) $
-                 setDDown 0 $
-                    if speed res > speedFactor res then
-                        (setSpeed <..> speedFactor) res
-                        else res
-        else
-            return $ setRPosition (CameraPosition (Vec3 (x, droph, y)) th ph) $
-                     setDDown (dDown res + 0.05) res
+    return $ 
+        if (newh+0.2 > droph) then
+            setRPosition (CameraPosition (Vec3 (x,newh,y)) th ph) $
+                    setDDown 0 $
+                        if speed res > speedFactor res then
+                            (setSpeed <..> speedFactor) res
+                            else res
+            else
+                setRPosition (CameraPosition (Vec3 (x, droph, y)) th ph) $
+                        setDDown (dDown res + 0.05) res
 
+{- A function which will explode if a uniform
+ - does not exist for the shader given, otherwis,
+ - it will return a list of uniform locations -}
 getUniformsSafe :: Program -> [String] -> IO [UniformLocation]
 getUniformsSafe prog uniforms =
-    forM uniforms $ \uniform -> do
-        tmp <- get $ uniformLocation prog uniform
+    forM uniforms $ \a_uniform -> do
+        tmp <- get $ uniformLocation prog a_uniform
         case tmp of
             UniformLocation (-1) -> do
-                putStrLn $ "No uniform with name: "++uniform
+                putStrLn $ "No uniform with name: "++a_uniform
                 exitWith (ExitFailure 112)
             _ ->  return tmp
 
+{- Builds an model view matrix given the
+ - camera position of the scene -}
 buildMVMatrix :: CameraPosition -> Mat4 GLfloat
 buildMVMatrix (CameraPosition eye th ph) =
     let up = if ph' >= 90 && ph' < 270 then Vec3 (0,-1,0) else Vec3 (0,1,0)
@@ -159,6 +151,8 @@ buildMVMatrix (CameraPosition eye th ph) =
     let lookat = eye <+> (Vec3 $ toEuclidian (1,th,ph)) in
         lookAtMatrix eye lookat up
 
+{- Called after each frame to crunch throught the
+ - events -}
 eventHandle :: SDL.Event -> Resources -> IO Resources
 eventHandle event res = do
     let (CameraPosition eye th ph) = rDPosition res
@@ -234,14 +228,15 @@ eventHandle event res = do
 
         _ -> return res
 
+{- Callback for the display -}
 displayHandle :: Resources -> IO Resources
 displayHandle resources = do
-    let cameraPos@(CameraPosition r th ph) = rPosition resources
+    let cameraPos@(CameraPosition loc _ _) = rPosition resources
     let lighty = ((/10) . fromIntegral . time) resources
     let logist c =  (1 / (1 + 2.71828**(-c*x))) * 0.9 + 0.1
             where x = sine $ Degrees (lighty)
     let globalAmbient::(GLfloat,GLfloat,GLfloat,GLfloat)
-        globalAmbient@(r,g,b,a)= ( logist 2+0.1, logist 10, (logist 15) + 0.1,(sine.Degrees) lighty)
+        globalAmbient = ( logist 2+0.1, logist 10, (logist 15) + 0.1,(sine.Degrees) lighty)
     let lightPos = Vec4( 50,
                          1000000 * (sine.Degrees $ lighty),
                          -1000000 * (cosine.Degrees . (/10) . fromIntegral . time) resources,
@@ -262,7 +257,7 @@ displayHandle resources = do
                 (normalMatrix)
                 (Vec4 globalAmbient)
                 cameraPos
-                (Vec3 $ toEuclidian (r,th,ph))
+                loc
                 resources
 
                 in mapM_ (Prelude.$rc) $ routines resources
@@ -357,45 +352,39 @@ buildTerrainObject builder = do
                 uniform fogU $= Index1 (0.9::GLfloat) else
                 uniform fogU $= Index1 (0.0::GLfloat)
 
-cloudProgram :: IO (ResourcesClosure -> IO ())
-cloudProgram = do
-    let randarray ptr n stgen =
-            if n == 0 then return () else do
-                let (tmp,stgen') = next stgen
-                putStrLn $ "TMP: " ++! (tmp `mod` 256)
-                poke ptr (fromIntegral $ tmp `mod` 256)
-                randarray (advancePtr ptr 1) (n - 1) stgen'
-    let builder =
-            forM_ simpleCube $ \(x,y,z) -> do
-                bColor4 (x,y,z,0)
-                bVertex3 (x,y+20,z)
-    program <- loadProgramSafe' "shaders/clouds.vert" "shaders/clouds.frag" noShader
-
-    stgen <- newStdGen
-    array3D <- SA.newListArray ((0,0,0,0),(3,64,64,64)) (map (fromIntegral . (`mod`256)) $ (randoms stgen::[Int]))
-
-    SA.withStorableArray array3D $ \ptr3D -> do
-        density <- makeTexture3D >>= textureFromPointer3D ptr3D (64,64,64)
-
-        obj' <- newDefaultGlyphObjectWithClosure builder () $ \_ -> do
-                    currentProgram $= Just program
-        [mvMatU, pMatU, densityU, globalAmbientU,lightposU] <- mapM (get . uniformLocation program)
-            ["mvMatrix","pMatrix","density","globalAmbient","lightpos"]
-        return $ \rc -> do
-            draw $ prepare obj' $ \_ -> do
-                cullFace $= Nothing
-                uniform mvMatU $= rcMVMatrix rc
-                uniform pMatU $= rcPMatrix rc
-                uniform globalAmbientU $= rcGlobalAmbient rc
-                uniform lightposU $= rcLightPos rc
-                setupTexturing3D density densityU 0
+-- cloudProgram :: IO (ResourcesClosure -> IO ())
+-- cloudProgram = do
+--     let builder =
+--             forM_ simpleCube $ \(x,y,z) -> do
+--                 bColor4 (x,y,z,0)
+--                 bVertex3 (x,y+20,z)
+--     program <- loadProgramSafe' "shaders/clouds.vert" "shaders/clouds.frag" noShader
+-- 
+--     stgen <- newStdGen
+--     array3D <- SA.newListArray ((0,0,0,0),(3,64,64,64)) (map (fromIntegral . (`mod`256)) $ (randoms stgen::[Int]))
+-- 
+--     SA.withStorableArray array3D $ \ptr3D -> do
+--         density <- makeTexture3D >>= textureFromPointer3D ptr3D (64,64,64)
+-- 
+--         obj' <- newDefaultGlyphObjectWithClosure builder () $ \_ -> do
+--                     currentProgram $= Just program
+--         [mvMatU, pMatU, densityU, globalAmbientU,lightposU] <- mapM (get . uniformLocation program)
+--             ["mvMatrix","pMatrix","density","globalAmbient","lightpos"]
+--         return $ \rc -> do
+--             draw $ prepare obj' $ \_ -> do
+--                 cullFace $= Nothing
+--                 uniform mvMatU $= rcMVMatrix rc
+--                 uniform pMatU $= rcPMatrix rc
+--                 uniform globalAmbientU $= rcGlobalAmbient rc
+--                 uniform lightposU $= rcLightPos rc
+--                 setupTexturing3D density densityU 0
             
 
 buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (ResourcesClosure -> IO ())
-buildForestObject seq obj tex =
-    if Seq.null seq then return ((const.return) ()) else do
+buildForestObject a_seq obj tex =
+    if Seq.null a_seq then return ((const.return) ()) else do
     let bufferIO :: IO BufferObject
-        bufferIO = (newArray . Fold.toList) seq >>= ptrToBuffer ArrayBuffer (Seq.length seq * 4)
+        bufferIO = (newArray . Fold.toList) a_seq >>= ptrToBuffer ArrayBuffer (Seq.length a_seq * 4)
     
     !buffer <- bufferIO
     (log',file) <- loadObjFile obj :: IO ([String],ObjectFile GLfloat)
@@ -421,10 +410,10 @@ buildForestObject seq obj tex =
 
                 bindBuffer ArrayBuffer $= Just buffer
 
-                let declareAttr location nelem offset = do
+                let declareAttr location nelem' offset = do
                             vertexAttribPointer location $=
                                 (ToFloat, VertexArrayDescriptor
-                                    nelem Float (fromIntegral $ (3+3+2+1)*sizeOf (0::GLfloat))
+                                    nelem' Float (fromIntegral $ (3+3+2+1+1)*sizeOf (0::GLfloat))
                                     (wordPtrToPtr offset))
                             vertexAttribArray location $= Enabled
                             vertexAttributeDivisor location SV.$= 1
@@ -433,10 +422,11 @@ buildForestObject seq obj tex =
                 declareAttr (AttribLocation 11) 3 (3*4)
                 declareAttr (AttribLocation 12) 2 (6*4)
                 declareAttr (AttribLocation 13) 1 (8*4)
+                declareAttr (AttribLocation 14) 1 (9*4)
 
                 printErrors "forestClosure"
-    putStrLn $ "N trees = " ++! (Seq.length seq `div` 3)
-    let obj'' = setNumInstances (Seq.length seq `div` 3) obj'
+    putStrLn $ "N trees = " ++! (Seq.length a_seq `div` 3)
+    let obj'' = setNumInstances (Seq.length a_seq `div` 3) obj'
 
     return $ \rc -> do
         draw $ (prepare obj'') $ \_ -> do
@@ -468,7 +458,7 @@ buildWaterObject builder = do
     return $ \rc -> do
         draw $ prepare obj $ \_ -> do
             cullFace $= Nothing
-            patchVertices SV.$= 4
+            patchVertices SV.$= (4::Int)
             uniform (UniformLocation 4) $= rcPMatrix rc 
             uniform (UniformLocation 5) $= rcMVMatrix rc
             uniform (UniformLocation 7) $= rcNormalMatrix rc
@@ -577,27 +567,27 @@ skyboxObject = do
 
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_S $ fromIntegral gl_CLAMP_TO_EDGE
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_T $ fromIntegral gl_CLAMP_TO_EDGE
-    texture <- load "textures/skybox_sides.png" >>= textureFromSurface
+    l_texture <- load "textures/skybox_sides.png" >>= textureFromSurface
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_S $ fromIntegral gl_CLAMP_TO_EDGE
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_T $ fromIntegral gl_CLAMP_TO_EDGE
-    texture2 <- load "textures/skybox_sides_night.png" >>= textureFromSurface
+    l_texture2 <- load "textures/skybox_sides_night.png" >>= textureFromSurface
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_S $ fromIntegral gl_CLAMP_TO_EDGE
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_T $ fromIntegral gl_CLAMP_TO_EDGE
-    textureTop <- load "textures/skybox_top.png" >>= textureFromSurface
+    l_textureTop <- load "textures/skybox_top.png" >>= textureFromSurface
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_S $ fromIntegral gl_CLAMP_TO_EDGE
     glTexParameteri gl_TEXTURE_2D gl_TEXTURE_WRAP_T $ fromIntegral gl_CLAMP_TO_EDGE
-    textureTopNight <- load "textures/skybox_top_night.png" >>= textureFromSurface
+    l_textureTopNight <- load "textures/skybox_top_night.png" >>= textureFromSurface
 
     [lightposU,multU] <- mapM (get . uniformLocation prog) 
                     ["lightpos","mult"]
     topObj <- newDefaultGlyphObjectWithClosure (skyboxTop 1) () $ \_ -> do
-        setupTexturing textureTop texLoc 2
-        setupTexturing textureTopNight texLocNight 3
+        setupTexturing l_textureTop texLoc 2
+        setupTexturing l_textureTopNight texLocNight 3
 
     obj <- newDefaultGlyphObjectWithClosure (skyboxSides 1) (matLoc,pmatLoc) $ \_ -> do
         currentProgram $= Just prog
-        setupTexturing texture texLoc 0
-        setupTexturing texture2 texLocNight 1
+        setupTexturing l_texture texLoc 0
+        setupTexturing l_texture2 texLocNight 1
         printErrors "Skybox"
 
     let obj' = teardown obj $ \_ -> do
@@ -606,11 +596,11 @@ skyboxObject = do
         depthFunc $= Nothing
         cullFace $= Nothing
         draw $ prepare obj' $ \this -> do
-            let (matLoc,pmatLoc) = getResources this
+            let (l_matLoc,l_pmatLoc) = getResources this
             let (CameraPosition _ th ph) = rcCameraPos rc
             uniform lightposU $= rcLightPos rc
-            uniform pmatLoc $= rcPMatrix rc
-            uniform matLoc $= buildMVMatrix (CameraPosition (Vec3 (0,0,0)) th ph)
+            uniform l_pmatLoc $= rcPMatrix rc
+            uniform l_matLoc $= buildMVMatrix (CameraPosition (Vec3 (0,0,0)) th ph)
             uniform (UniformLocation 1) $= rcGlobalAmbient rc
             bool <- (resourcesUnderWater $ rcResources rc)
             if bool then

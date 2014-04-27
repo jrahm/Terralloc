@@ -230,18 +230,18 @@ whileM bool routine' start' =
 untilM_ :: (Monad m) => (a -> Bool) -> m a -> m a
 untilM_ func routine = do
     start <- routine
-    case func start of
-        True -> untilM_ func routine
-        False -> return start
+    if' (func start)
+        (untilM_ func routine)
+        (return start)
 
 untilM :: (Monad m) => (a -> Bool) -> m a -> m [a]
 untilM func' routine' =
     untilM' func' routine' []
     where untilM' func routine lst = do
             start <- routine
-            case func start of
-                True -> untilM' func routine (lst ++ [start])
-                False -> return lst
+            if' (func start)
+                (untilM' func routine (lst ++ [start]))
+                (return lst)
 
 dFold :: [a] -> b -> (a -> a -> b -> b) -> b
 dFold (x1:x2:xs) next func = dFold (x2:xs) (func x1 x2 next) func
@@ -251,7 +251,7 @@ dFold _ next _ = next
 (!>>) a f = a `seq` f a
 
 (!>>=) :: Monad m => m a -> (a -> m b) -> m b
-(!>>=) a f = a !>> (flip (>>=) f)
+(!>>=) a f = a !>> flip (>>=) f
 
 {- Objective function composition. Useful to say
  - (drawArrays <..> numInstances) obj
@@ -263,13 +263,13 @@ toHex :: (Integral a,Show a) => a -> String
 toHex n | n == 0 = ""
         | otherwise = 
             let (quot',rem') = n `divMod` 16 in
-            toHex quot' ++ [(index' !! fromIntegral rem')]
+            toHex quot' ++ [index' !! fromIntegral rem']
         where index' = "0123456789ABCDEFGHIJKlMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 average :: (Fold.Foldable a, Real c, Fractional b) => a c -> b
 average lst =
     let (sum',count) = Fold.foldl' (\(sum_,count_) x -> (sum_ + x, count_ + 1)) (0,0) lst in
-        (realToFrac sum') / count
+        realToFrac sum' / count
 
 maybeDefault :: a -> Maybe a -> a
 maybeDefault a b = fromJust $ b >||> Just a
@@ -287,7 +287,7 @@ runMonadPlusBuilder :: MonadPlusBuilder a b -> a
 runMonadPlusBuilder (MonadPlusBuilder !a _) = a
 
 instance (MonadPlus a) => Monad (MonadPlusBuilder (a b)) where
-    return x = MonadPlusBuilder mzero x
+    return = MonadPlusBuilder mzero
     MonadPlusBuilder a1 _ >> MonadPlusBuilder a2 b = MonadPlusBuilder (a1 `mplus` a2) b
     builder@(MonadPlusBuilder _ b) >>= f = builder >> f b
     fail = undefined
@@ -313,3 +313,10 @@ distribMaybe (Just (a,b)) = (Just a, Just b)
 
 whenM :: IO Bool -> IO () -> IO ()
 whenM b = (>>=) b . flip when
+
+mix :: (Floating a) => a -> a -> a -> a
+mix a b c = a * c + b * (1 - c)
+
+fpart :: (RealFrac a) => a -> a
+fpart x = x - (fromIntegral (floor x::Int))
+

@@ -16,6 +16,7 @@ uniform float dY ;
 in vec2 texposition ;
 in vec3 normal ;
 in vec4 frag_position ;
+in float shade ;
 
 vec4 sample(float xc,float yc) {
    return texture2D(texture,texposition + vec2(xc,yc));
@@ -49,5 +50,5 @@ void main() {
     vec4 col = texture2D(texture,texposition) ;
     float coef = max(dot( normalize(newNorm),
                           normalize(vec3(frag_position - light)) ),0) + (globalAmbient.a/4.0) ;
-    frag_color = vec4( col.xyz * coef * globalAmbient.xyz, col.a);
+    frag_color = vec4( shade * col.xyz * coef * globalAmbient.xyz, col.a);
 }

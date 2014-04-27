@@ -16,15 +16,18 @@ layout(location = 10) in vec3 in_translation ;
 layout(location = 11) in vec3 in_scale ;
 layout(location = 12) in vec2 in_sincos_rot ;
 layout(location = 13) in float noise ;
+layout(location = 14) in float in_shade ;
 
 out vec2 texposition ;
 out vec3 normal ;
 out vec4 frag_position ;
+out float shade ;
 
 void main() {
     float s = in_sincos_rot.x ;
     float c = in_sincos_rot.y ;
 
+    shade = in_shade ;
     mat3 rot = mat3( c,0,s,
                      0,1,0,
                     -s,0,c ) ;
