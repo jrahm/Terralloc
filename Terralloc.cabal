@@ -22,4 +22,4 @@ executable terralloc.bin
   ghc-options: -rtsopts -O3
  -- ghc-options: -prof -osuf h_o
   -- other-modules:       
-  build-depends:       setters, base, OpenGL, bytestring, array, SDL, random, OpenGLRaw, AC-Angle, deepseq, containers, SDL-image, cpu, template-haskell, filepath, MissingH, StateVar
+  build-depends:       setters, base, OpenGL, bytestring, array, SDL, random, OpenGLRaw, AC-Angle, deepseq, containers, SDL-image, cpu, template-haskell, filepath, MissingH, StateVar, time

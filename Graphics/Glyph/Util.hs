@@ -320,3 +320,5 @@ mix a b c = a * c + b * (1 - c)
 fpart :: (RealFrac a) => a -> a
 fpart x = x - (fromIntegral (floor x::Int))
 
+ifNaN :: (RealFloat a) => a -> a -> a
+ifNaN reg def = if' (isNaN reg) def reg

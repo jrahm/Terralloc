@@ -39,6 +39,8 @@ import TileShow
 
 import Data.Array
 import qualified Data.StateVar as SV
+import Data.Time.Clock.POSIX
+import Control.Concurrent
 
 {- Types of terrain which are possible -}
 data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
@@ -74,16 +76,48 @@ data Resources = Resources {
 
     routines :: [ResourcesClosure -> IO ()],
 
-    speed :: GLfloat,
     timeSpeed :: Int,
     time :: Int,
 
     heightMap :: Array (Int,Int) Tile,
     positionUpdate :: (Resources -> IO Resources),
+
+    {- Smaller if in first person -}
     speedFactor :: GLfloat,
+    {- Higher if shift is held -}
+    speedMultiplier :: GLfloat,
+    {- Direction -}
+    speedDirection :: Vec3 GLfloat,
+
     dDown :: GLfloat,
-    waterArray :: ArrIO.IOArray (Int,Int) GLfloat
+    waterArray :: ArrIO.IOArray (Int,Int) GLfloat,
+    headBob :: GLfloat,
+    mode :: CameraMode
 }
+
+getSpeed :: Resources -> GLfloat
+getSpeed res =speedFactor res * speedMultiplier res
+
+cameraForward :: CameraPosition -> Vec3 GLfloat
+cameraForward (CameraPosition _ th ph) = Vec3 $ toEuclidian (1,th,ph)
+
+cameraUp :: CameraPosition -> Vec3 GLfloat
+cameraUp (CameraPosition _ _ ph) = 
+    if ph' >= 90 && ph' < 270 then Vec3 (0,-1,0) else Vec3 (0,1,0)
+            where ph' = (floor ph::Int) `mod` 360
+
+cameraRight :: CameraPosition -> Vec3 GLfloat
+cameraRight cam = cameraUp cam × cameraForward cam
+
+
+getVelocity :: Resources -> Vec3 GLfloat
+getVelocity res =
+    let dir = speedDirection res
+        camdir = cameraForward $ rPosition res
+        truedir = dir <-> (Vec3 (0,0,1) <-> camdir) in
+    getSpeed res `vScale` (norm dir `vScale` V.normalize truedir)
+
+data CameraMode = Oracle | FirstPerson deriving Eq
 
 {- Central data type for rendering each frame -}
 data ResourcesClosure = ResourcesClosure {
@@ -104,7 +138,7 @@ $(declareSetters ''Resources)
  - person -}
 firstPerson :: Resources -> IO Resources
 firstPerson res =
-    let (CameraPosition (Vec3 (x,curh,y)) th ph) = rPosition res
+    let camera@(CameraPosition (Vec3 (x,curh,y)) th ph) = rPosition res
         (_,(w,h)) = bounds $ heightMap res
         (!!!) arr (x',y') = if x' < 0 || y' < 0 || x' > w || y' > h then -1000 else elevation (arr ! (x',y'))
         h1 = ((/10.0).fromIntegral) (heightMap res !!! (floor x, floor y) )
@@ -115,19 +149,19 @@ firstPerson res =
         v = y - (int $ (floor y::Int))
         mixu1 = mix h3 h1 u
         mixu2 = mix h4 h2 u
-        newh = mix mixu2 mixu1 v + 0.2
+        newh = mix mixu2 mixu1 v
         droph = curh - dDown res
+        jitter = (max 0 $ getSpeed res - 0.029) ** 0.1 / 2
+        dy = sin (headBob res*2) * jitter
+        dx = realToFrac $ cos (headBob res) * jitter 
         in do
-    return $ 
-        if (newh+0.2 > droph) then
-            setRPosition (CameraPosition (Vec3 (x,newh,y)) th ph) $
-                    setDDown 0 $
-                        if speed res > speedFactor res then
-                            (setSpeed <..> speedFactor) res
-                            else res
+    return $ ((setHeadBob.(+ jitter)) <..> headBob) $
+        if (newh+0.3 > droph) then
+            setRPosition (CameraPosition (Vec3 (x,newh+0.2,y)) (th + asin dx) (ph - asin dy)) $
+                    setDDown 0 res
             else
                 setRPosition (CameraPosition (Vec3 (x, droph, y)) th ph) $
-                        setDDown (dDown res + 0.05) res
+                        setDDown (dDown res + 0.03) res
 
 {- A function which will explode if a uniform
  - does not exist for the shader given, otherwis,
@@ -145,11 +179,9 @@ getUniformsSafe prog uniforms =
 {- Builds an model view matrix given the
  - camera position of the scene -}
 buildMVMatrix :: CameraPosition -> Mat4 GLfloat
-buildMVMatrix (CameraPosition eye th ph) =
-    let up = if ph' >= 90 && ph' < 270 then Vec3 (0,-1,0) else Vec3 (0,1,0)
-            where ph' = (floor ph::Int) `mod` 360 in
-    let lookat = eye <+> (Vec3 $ toEuclidian (1,th,ph)) in
-        lookAtMatrix eye lookat up
+buildMVMatrix camera@(CameraPosition eye _ _) =
+    let lookat = eye <+> cameraForward camera in
+        lookAtMatrix eye lookat (cameraUp camera)
 
 {- Called after each frame to crunch throught the
  - events -}
@@ -184,28 +216,30 @@ eventHandle event res = do
             return $ setRDPosition (CameraPosition eye (th+1) ph) res
 
         MouseMotion _ _ x y -> do
-            return $ setRPosition (CameraPosition peye (pth+(fromIntegral x/30.0)) (pph-(fromIntegral y/30.0))) res
+            return $
+                setRPosition (CameraPosition peye (pth+(fromIntegral x/30.0)) (pph-(fromIntegral y/30.0))) res
 
         KeyDown (Keysym SDLK_w _ _) ->
-            return $ setSpeed (speed res + speedFactor res) res
+            return $ setSpeedDirection (Vec3 (0,0,1)) res
         KeyDown (Keysym SDLK_s _ _) ->
-            return $ setSpeed (speed res - speedFactor res) res
+            return $ setSpeedDirection (Vec3 (0,0,-1)) res
         KeyUp (Keysym SDLK_w _ _) ->
-            return $ setSpeed 0 res
+            return $ setSpeedDirection (Vec3 (0,0,0)) res
         KeyUp (Keysym SDLK_s _ _) ->
-            return $ setSpeed 0 res
+            return $ setSpeedDirection (Vec3 (0,0,0)) res
 
         KeyUp (Keysym SDLK_q _ _) ->
             let getY (Vec3 (_,y,_)) = y in
             return $
                 setPositionUpdate firstPerson $
-                setSpeedFactor 0.1 $
+                setSpeedFactor 0.03 $
+                setMode FirstPerson $
                     (setDDown <..> (negate . getY . resourcesVelocity)) res
         KeyUp (Keysym SDLK_e _ _) ->
             return $
                 setPositionUpdate return $
                 setSpeedFactor 1 $
-                    if speed res > 0 then setSpeed 1 res else res
+                setMode Oracle res
 
         KeyUp (Keysym SDLK_f _ _) -> do
             ret <- reshape 1920 1080 res
@@ -219,18 +253,21 @@ eventHandle event res = do
             return res
 
         KeyDown (Keysym SDLK_SPACE _ _) -> do
-            return $ setDDown (-0.3) res
+            return $ setDDown (-0.2) res
 
         KeyDown (Keysym SDLK_LSHIFT _ _) -> do
-            return $ (setSpeed <..> ((*3) . speed)) res
+            return $ setSpeedMultiplier 4 res
+
         KeyUp (Keysym SDLK_LSHIFT _ _) -> do
-            return $ (setSpeed <..> ((/3) . speed)) res
+            return $ setSpeedMultiplier 1 res
 
         _ -> return res
+        where oracle = if (mode res == FirstPerson) then 1 else 3
 
 {- Callback for the display -}
 displayHandle :: Resources -> IO Resources
 displayHandle resources = do
+    time1 <- getPOSIXTime
     let cameraPos@(CameraPosition loc _ _) = rPosition resources
     let lighty = ((/10) . fromIntegral . time) resources
     let logist c =  (1 / (1 + 2.71828**(-c*x))) * 0.9 + 0.1
@@ -263,13 +300,21 @@ displayHandle resources = do
                 in mapM_ (Prelude.$rc) $ routines resources
 
     SDL.glSwapBuffers
+    time2 <- getPOSIXTime
+
+    let diff = 0.033 - (time2 - time1)
+    when (diff > 0) (threadDelay $ round $ diff * 1000000)
+    time3 <- getPOSIXTime
+
+    putStrLn $ "FPS: " ++! (1/ (time3 - time1))
+
     return resources
 
 cameraToEuclidian :: CameraPosition -> Vec3 GLfloat
 cameraToEuclidian (CameraPosition _ ph th) = V.normalize $ Vec3 $ toEuclidian (1,ph,th)
 
 resourcesVelocity :: Resources -> Vec3 GLfloat
-resourcesVelocity res = speed res `vScale` cameraToEuclidian (rPosition res)
+resourcesVelocity res = getSpeed res `vScale` cameraToEuclidian (rPosition res)
 
 resourcesUnderWater :: Resources -> IO Bool
 resourcesUnderWater res = do
@@ -285,8 +330,8 @@ updateHandle res = do
             let new = ((+) `on` (Prelude.$ res)) timeSpeed time  in
                 setTime new res
    where (CameraPosition x y z) `cAdd` (CameraPosition _ y' z') =
-           let x' = speed res `vScale` (V.normalize $ Vec3 $ toEuclidian (1,y, z)) in
-            (CameraPosition (x <+> x') (y + y') (z + z'))
+           let x' = getVelocity res in
+            CameraPosition (x <+> x') (y + y') (z + z')
 
 reshape :: Int -> Int -> Resources -> IO Resources
 reshape w h res =
@@ -506,14 +551,17 @@ makeResources surf builder forestB jungleB water arr waterarr = do
         <*> pure pMatrix'
         <*> pure pMatrix'
         <*> l_routines
-        <*> pure 0
         <*> pure 1
         <*> pure 0
         <*> pure arr
         <*> pure return
         <*> pure 1
+        <*> pure 1
+        <*> pure (Vec3 (0,0,0))
         <*> pure 0
         <*> pure waterarr
+        <*> pure 0
+        <*> pure Oracle
 
 printErrors :: String -> IO ()
 printErrors ctx =

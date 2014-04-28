@@ -132,7 +132,7 @@ startPipeline reshapeH eventH displayH updateH ini = do
             _ -> eventH ev res >>= pumpEvents'
     let runPipeline val = do
             res <- pumpEvents' val >>= displayH
-            SDL.glSwapBuffers `seq` (updateH res) >>= runPipeline
+            updateH res >>= runPipeline
 
     -- TODO unhardcode this
     reshapeH 640 480 ini >>= runPipeline
