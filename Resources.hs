@@ -94,7 +94,8 @@ data Resources = Resources {
     dDown :: GLfloat,
     waterArray :: ArrIO.IOArray (Int,Int) GLfloat,
     headBob :: GLfloat,
-    mode :: CameraMode
+    mode :: CameraMode,
+    threadDiff :: Double
 }
 
 getSpeed :: Resources -> GLfloat
@@ -160,6 +161,7 @@ firstPerson res =
         in do
     return $ ((setHeadBob.(+ jitter)) <..> headBob) $
         if (newh+0.3 > droph) then
+            setSpeedFactor 0.03 $
             setRPosition (CameraPosition (Vec3 (x,newh+0.2,y)) (th + (asin dx) * speed * 15) (ph - (asin dy) * speed * 15)) $
                     setDDown 0 res
             else
@@ -245,7 +247,6 @@ eventHandle event res = do
             let getY (Vec3 (_,y,_)) = y in
             return $
                 setPositionUpdate firstPerson $
-                setSpeedFactor 0.03 $
                 setMode FirstPerson $
                     (setDDown <..> (negate . getY . resourcesVelocity)) res
         KeyUp (Keysym SDLK_e _ _) ->
@@ -266,7 +267,9 @@ eventHandle event res = do
             return res
 
         KeyDown (Keysym SDLK_SPACE _ _) -> do
-            return $ setDDown (-0.2) res
+            return $ 
+                setDDown (-0.2) $
+                setSpeedFactor 0.05 res
 
         KeyDown (Keysym SDLK_LSHIFT _ _) -> do
             return $ setSpeedMultiplier 4 res
@@ -315,13 +318,17 @@ displayHandle resources = do
     SDL.glSwapBuffers
     time2 <- getPOSIXTime
 
-    let diff = 0.033 - (time2 - time1)
+    let diff = threadDiff resources - (realToFrac $ time2 - time1)
     when (diff > 0) (threadDelay $ round $ diff * 1000000)
     time3 <- getPOSIXTime
+    let fps = realToFrac $ 1 / (time3 - time1) :: Double
 
-    putStr $ printf "FPS: %.2f\r" (realToFrac $ 1/ (time3 - time1) :: Double)
+    putStr $ printf "FPS: %.2f\r" fps
 
-    return resources
+    return $
+        if' (fps < 30)
+            ((setThreadDiff.(subtract 0.0001)) <..> threadDiff)
+            ((setThreadDiff.(+0.0001)) <..> threadDiff) resources
 
 cameraToEuclidian :: CameraPosition -> Vec3 GLfloat
 cameraToEuclidian (CameraPosition _ ph th) = V.normalize $ Vec3 $ toEuclidian (1,ph,th)
@@ -576,6 +583,7 @@ makeResources surf builder forestB jungleB water arr waterarr = do
         <*> pure waterarr
         <*> pure 0
         <*> pure Oracle
+        <*> pure 0.033
 
 printErrors :: String -> IO ()
 printErrors ctx =
