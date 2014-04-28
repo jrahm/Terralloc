@@ -261,6 +261,10 @@ eventHandle event res = do
             SDL.showCursor False
             SDL.grabInput True
             return ret
+        KeyUp (Keysym SDLK_c _ _) -> do
+            SDL.showCursor True
+            SDL.grabInput False
+            return res
         KeyUp (Keysym SDLK_g _ _) -> do
             SDL.showCursor False
             SDL.grabInput True
