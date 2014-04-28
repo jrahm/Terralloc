@@ -346,7 +346,7 @@ main = do
 
     (mapping,water) <- getWaterQuads arr coloredArr
     coloredArr2 <- mapArray (\idx -> if idx == 0 then -1 else Map.findWithDefault (-1) idx mapping) coloredArr
-    printShowArray coloredArr2
+    -- printShowArray coloredArr2
 
     {- Kick off SDL with the callbacks defined in Resources -}
     makeResources surface (createBuilder arr) forestLocations jungleLocations water arr coloredArr2

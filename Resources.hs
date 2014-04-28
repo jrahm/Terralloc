@@ -41,6 +41,8 @@ import Data.Array
 import qualified Data.StateVar as SV
 import Data.Time.Clock.POSIX
 import Control.Concurrent
+import Text.Printf
+import System.IO
 
 {- Types of terrain which are possible -}
 data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
@@ -96,7 +98,7 @@ data Resources = Resources {
 }
 
 getSpeed :: Resources -> GLfloat
-getSpeed res =speedFactor res * speedMultiplier res
+getSpeed res =speedFactor res * speedMultiplier res * norm (speedDirection res)
 
 cameraForward :: CameraPosition -> Vec3 GLfloat
 cameraForward (CameraPosition _ th ph) = Vec3 $ toEuclidian (1,th,ph)
@@ -114,8 +116,8 @@ getVelocity :: Resources -> Vec3 GLfloat
 getVelocity res =
     let dir = speedDirection res
         camdir = cameraForward $ rPosition res
-        truedir = dir <-> (Vec3 (0,0,1) <-> camdir) in
-    getSpeed res `vScale` (norm dir `vScale` V.normalize truedir)
+        truedir = coordinateConvert camdir (Vec3 (0,1,0)) dir in
+    getSpeed res `vScale` maybeNormalize truedir
 
 data CameraMode = Oracle | FirstPerson deriving Eq
 
@@ -151,13 +153,14 @@ firstPerson res =
         mixu2 = mix h4 h2 u
         newh = mix mixu2 mixu1 v
         droph = curh - dDown res
-        jitter = (max 0 $ getSpeed res - 0.029) ** 0.1 / 2
+        speed = getSpeed res
+        jitter = (max 0 $ speed - 0.029) ** 0.1 / 2
         dy = sin (headBob res*2) * jitter
         dx = realToFrac $ cos (headBob res) * jitter 
         in do
     return $ ((setHeadBob.(+ jitter)) <..> headBob) $
         if (newh+0.3 > droph) then
-            setRPosition (CameraPosition (Vec3 (x,newh+0.2,y)) (th + asin dx) (ph - asin dy)) $
+            setRPosition (CameraPosition (Vec3 (x,newh+0.2,y)) (th + (asin dx) * speed * 15) (ph - (asin dy) * speed * 15)) $
                     setDDown 0 res
             else
                 setRPosition (CameraPosition (Vec3 (x, droph, y)) th ph) $
@@ -189,6 +192,7 @@ eventHandle :: SDL.Event -> Resources -> IO Resources
 eventHandle event res = do
     let (CameraPosition eye th ph) = rDPosition res
     let (CameraPosition peye pth pph) = rPosition res
+
     case event of
         KeyDown (Keysym SDLK_ESCAPE _ _) -> exitSuccess
 
@@ -220,13 +224,22 @@ eventHandle event res = do
                 setRPosition (CameraPosition peye (pth+(fromIntegral x/30.0)) (pph-(fromIntegral y/30.0))) res
 
         KeyDown (Keysym SDLK_w _ _) ->
-            return $ setSpeedDirection (Vec3 (0,0,1)) res
+            return $ ((setSpeedDirection.(<+>Vec3 (0,0,1))) <..> speedDirection) res
         KeyDown (Keysym SDLK_s _ _) ->
-            return $ setSpeedDirection (Vec3 (0,0,-1)) res
+            return $ ((setSpeedDirection.(<->Vec3 (0,0,1))) <..> speedDirection) res
+        KeyDown (Keysym SDLK_d _ _) ->
+            return $ ((setSpeedDirection.(<+>Vec3 (1,0,0))) <..> speedDirection) res
+        KeyDown (Keysym SDLK_a _ _) ->
+            return $ ((setSpeedDirection.(<->Vec3 (1,0,0))) <..> speedDirection) res
+
         KeyUp (Keysym SDLK_w _ _) ->
-            return $ setSpeedDirection (Vec3 (0,0,0)) res
+            return $ ((setSpeedDirection.(<->Vec3 (0,0,1))) <..> speedDirection) res
         KeyUp (Keysym SDLK_s _ _) ->
-            return $ setSpeedDirection (Vec3 (0,0,0)) res
+            return $ ((setSpeedDirection.(<+>Vec3 (0,0,1))) <..> speedDirection) res
+        KeyUp (Keysym SDLK_d _ _) ->
+            return $ ((setSpeedDirection.(<->Vec3 (1,0,0))) <..> speedDirection) res
+        KeyUp (Keysym SDLK_a _ _) ->
+            return $ ((setSpeedDirection.(<+>Vec3 (1,0,0))) <..> speedDirection) res
 
         KeyUp (Keysym SDLK_q _ _) ->
             let getY (Vec3 (_,y,_)) = y in
@@ -306,7 +319,7 @@ displayHandle resources = do
     when (diff > 0) (threadDelay $ round $ diff * 1000000)
     time3 <- getPOSIXTime
 
-    putStrLn $ "FPS: " ++! (1/ (time3 - time1))
+    putStr $ printf "FPS: %.2f\r" (realToFrac $ 1/ (time3 - time1) :: Double)
 
     return resources
 
@@ -521,6 +534,7 @@ makeResources :: SDL.Surface -> BuilderM GLfloat b ->
     BuilderM GLfloat a -> Array (Int,Int) Tile ->
     ArrIO.IOArray (Int,Int) GLfloat -> IO Resources
 makeResources surf builder forestB jungleB water arr waterarr = do
+    hSetBuffering stdout NoBuffering
     let pMatrix' = perspectiveMatrix 50 1.8 0.1 100
 
     let l_routines = sequence [
@@ -533,15 +547,15 @@ makeResources surf builder forestB jungleB water arr waterarr = do
                 blend $= Enabled
                 cullFace $= Just Back
                 blendFunc $= (GL.SrcAlpha,OneMinusSrcAlpha)),
+            buildWaterObject water,
             buildForestObject forestB "tree.obj" "textures/wood_low.png",
-            buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png",
-            buildWaterObject water
+            buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png"
             -- cloudProgram
          ]
     Resources 
         <$> pure surf
         <*> do CameraPosition
-                <$> pure (Vec3 (10,10,2))
+                <$> pure (Vec3 (10,10,-10))
                 <*> pure 0
                 <*> pure 0
         <*> do CameraPosition

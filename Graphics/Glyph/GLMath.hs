@@ -191,6 +191,17 @@ rotationMatrix ang (Vec3 (u,v,w)) =
 zRotationMatrix :: GLfloat -> Mat3 GLfloat
 zRotationMatrix ang = rotationMatrix ang (Vec3 (0,0,1))
 
+maybeNormalize :: (Vector f a, Eq f) => a f -> a f
+maybeNormalize x = if norm x == 0 then x else normalize x
+
+coordinateConvert :: Vec3 GLfloat -> Vec3 GLfloat -> Vec3 GLfloat -> Vec3 GLfloat
+coordinateConvert forward up' vector =
+    if vector == Vec3 (0,0,0) then vector else
+        let right = forward × up'
+            up = right × forward in
+            case (normalize forward, normalize up, normalize right, vector) of
+                (za,ya,xa,Vec3 (x,y,z)) -> (x `vScale` xa) <+> (y `vScale` ya) <+> (z `vScale` za)
+        
 rotateFrom :: Vec3 GLfloat -> Vec3 GLfloat -> Vec3 GLfloat -> Vec3 GLfloat
 rotateFrom vector relative newRelative =
     if vector == Vec3 (0,0,0) then vector else
