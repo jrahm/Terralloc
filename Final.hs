@@ -122,6 +122,7 @@ colorArray marr = do
  - 2 things:
  - A map of water bodies ids to elevations (to detect if you are under water
  - A builder that will generate all of the quads for the water. -}
+
 getWaterQuads :: Array (Int,Int) Tile -> IOArray (Int,Int) Int -> IO ( Map.Map Int GLfloat, BuilderM GLfloat () )
 getWaterQuads marr arr = do
     let (_,(w,h)) = bounds marr

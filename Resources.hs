@@ -43,6 +43,7 @@ import Data.Time.Clock.POSIX
 import Control.Concurrent
 import Text.Printf
 import System.IO
+import System.Random
 
 {- Types of terrain which are possible -}
 data TileType = Forest | Beach | Water | Grass | Jungle | Mountains | 
@@ -282,7 +283,6 @@ eventHandle event res = do
             return $ setSpeedMultiplier 1 res
 
         _ -> return res
-        where oracle = if (mode res == FirstPerson) then 1 else 3
 
 {- Callback for the display -}
 displayHandle :: Resources -> IO Resources
@@ -448,6 +448,41 @@ buildTerrainObject builder = do
 --                 uniform lightposU $= rcLightPos rc
 --                 setupTexturing3D density densityU 0
             
+buildSnowVal :: Array (Int,Int) Tile -> StdGen -> BuilderM GLfloat ()
+buildSnowVal arr gen =
+    let (_,(w,h)) = bounds arr
+        run :: [Int] -> (Int,Int) -> BuilderM GLfloat [Int]
+        run rs (x,y) = do
+            let (seed:npart:t) = rs
+                nStdGen = mkStdGen seed
+                height = elevation (arr ! (x,y))
+            when (tileType (arr ! (x,y)) == Tundra) $
+                forM_ (take (npart`mod`50) $ chunkList3 $ randomRs (0::GLfloat,1) nStdGen ) $ \(a,b,c) -> do
+                    let (x',y') = (int x + a, int y + b)
+                    bVertex3 (x',c*100,y')
+                    bColor4 (int $ height `div` 10,1, 0, 0)
+
+            return t
+        in
+
+        foldM_ run (randoms gen) [(x,y) | x <- [1..w], y <- [1..h]]
+
+buildSnowObject :: Array (Int,Int) Tile -> StdGen -> IO (ResourcesClosure -> IO ())
+buildSnowObject arr gen = do
+    snowProgram <- loadProgramSafe' "shaders/snow.vert" "shaders/snow.frag" (Just "shaders/snow.geom")
+    obj <-
+        liftM (setPrimitiveMode Ex.Points) $
+        newDefaultGlyphObjectWithClosure (buildSnowVal arr gen) () $ \_ -> do
+            currentProgram $= Just snowProgram 
+
+    [globalAmbientU,pjMatrixU,mvMatrixU,timeU] <-
+        getUniformsSafe snowProgram ["globalAmbient","pjMatrix","mvMatrix","time"]
+    return $ \rc -> do
+        draw $ (prepare obj) $ \_ -> do
+            uniform mvMatrixU $= rcMVMatrix rc
+            uniform pjMatrixU $= rcPMatrix rc
+            uniform timeU $= (Index1 $ (rcTime rc/75))
+            uniform globalAmbientU $= rcGlobalAmbient rc
 
 buildForestObject :: Seq.Seq GLfloat -> String -> String -> IO (ResourcesClosure -> IO ())
 buildForestObject a_seq obj tex =
@@ -532,7 +567,7 @@ buildWaterObject builder = do
             uniform (UniformLocation 5) $= rcMVMatrix rc
             uniform (UniformLocation 7) $= rcNormalMatrix rc
             uniform (UniformLocation 8) $= rcLightPos rc
-            uniform (UniformLocation 9) $= Index1 (rcTime rc / 20.0)
+            uniform (UniformLocation 9) $= Index1 (rcTime rc / 20.0);
             uniform (UniformLocation 10) $= rcGlobalAmbient rc
             bool <- (resourcesUnderWater $ rcResources rc)
             if bool then
@@ -548,6 +583,7 @@ makeResources surf builder forestB jungleB water arr waterarr = do
     hSetBuffering stdout NoBuffering
     let pMatrix' = perspectiveMatrix 50 1.8 0.1 100
 
+    stdgen <- newStdGen
     let l_routines = sequence [
             skyboxObject,
             (return $ \_ -> do
@@ -560,7 +596,8 @@ makeResources surf builder forestB jungleB water arr waterarr = do
                 blendFunc $= (GL.SrcAlpha,OneMinusSrcAlpha)),
             buildWaterObject water,
             buildForestObject forestB "tree.obj" "textures/wood_low.png",
-            buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png"
+            buildForestObject jungleB "jungletree.obj" "textures/jungle_tree.png",
+            buildSnowObject arr stdgen
             -- cloudProgram
          ]
     Resources 

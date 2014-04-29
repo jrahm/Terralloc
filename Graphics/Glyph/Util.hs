@@ -322,3 +322,16 @@ fpart x = x - (fromIntegral (floor x::Int))
 
 ifNaN :: (RealFloat a) => a -> a -> a
 ifNaN reg def = if' (isNaN reg) def reg
+
+everyN :: Int -> [a] -> [a]
+everyN _ [] = []
+everyN n (x : xs) = x : (everyN n $ drop n xs)
+
+chunkList :: [a] -> [(a,a)]
+chunkList l = zip [x | x <- everyN 1 l] [x | x <- everyN 1 (tail l)]
+
+chunkList3 :: [a] -> [(a,a,a)]
+chunkList3 l = zip3
+    [x | x <- everyN 2 l]
+    [x | x <- everyN 2 (tail l)]
+    [x | x <- everyN 2 (tail $ tail l)]
